@@ -53,10 +53,12 @@ function getLocalIp() {
 
 const PORT = process.env.PORT || 3000;
 
-app.listen(PORT, '0.0.0.0', () => {
-  const localIp = getLocalIp();
-  console.log(`🚀 FateLink 2.0 Backend (Modular) rodando em http://localhost:${PORT}`);
-  console.log(`📱 Acesso via rede local: http://${localIp}:${PORT}`);
-});
+if (!process.env.VERCEL) {
+  app.listen(PORT, '0.0.0.0', () => {
+    const localIp = getLocalIp();
+    console.log(`🚀 FateLink 2.0 Backend (Modular) rodando em http://localhost:${PORT}`);
+    console.log(`📱 Acesso via rede local: http://${localIp}:${PORT}`);
+  });
+}
 
 module.exports = app;

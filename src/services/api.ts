@@ -262,6 +262,11 @@ if (process.env.EXPO_PUBLIC_API_URL) {
   candidateList.push(process.env.EXPO_PUBLIC_API_URL.replace(/\/$/, ''));
 }
 
+// Na Web, chamadas com caminho relativo ('') funcionam perfeitamente na Vercel (onde /api é servido como Serverless Function)
+if (Platform.OS === 'web' && typeof window !== 'undefined') {
+  candidateList.push('');
+}
+
 // Se estiver em HTTPS na Web sem variável customizada, não inclui localhost:3000 ou http://host:3000 para não quebrar com Mixed Content
 if (!isWebHttps || process.env.EXPO_PUBLIC_API_URL) {
   if (detectedHost) {
