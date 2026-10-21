@@ -7,19 +7,16 @@ import {
   Image,
   TextInput,
   StyleSheet,
-  Modal,
   KeyboardAvoidingView,
   Platform,
   ActivityIndicator,
   RefreshControl,
-  Dimensions,
+  useWindowDimensions,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { Colors } from '../theme/colors';
 import { Conversation, NotificationItem, ChatMessage } from '../types';
 import { api } from '../services/api';
-
-const { width: SCREEN_WIDTH } = Dimensions.get('window');
 
 interface ChatScreenProps {
   currentUserId?: number;
@@ -32,6 +29,9 @@ export const ChatScreen: React.FC<ChatScreenProps> = ({
   activeChatTarget,
   onClearTarget,
 }) => {
+  const { width: windowWidth } = useWindowDimensions();
+  const isWide = windowWidth >= 768;
+
   const [activeTab, setActiveTab] = useState<'messages' | 'notifications'>('messages');
   const [conversations, setConversations] = useState<Conversation[]>([]);
   const [notifications, setNotifications] = useState<NotificationItem[]>([]);
@@ -43,7 +43,6 @@ export const ChatScreen: React.FC<ChatScreenProps> = ({
   const [sending, setSending] = useState(false);
 
   const flatListRef = useRef<FlatList>(null);
-  const isWide = Platform.OS === 'web' && SCREEN_WIDTH >= 820;
 
   // Carregar conversas e notificações do PostgreSQL
   const loadData = async () => {
@@ -213,7 +212,13 @@ export const ChatScreen: React.FC<ChatScreenProps> = ({
         {/* Header do Chat */}
         <View style={styles.chatPaneHeader}>
           {!isWide && (
-            <TouchableOpacity onPress={() => setSelectedConv(null)} style={styles.backBtn}>
+            <TouchableOpacity
+              onPress={() => setSelectedConv(null)}
+              style={styles.backBtn}
+              activeOpacity={0.7}
+              hitSlop={{ top: 12, bottom: 12, left: 12, right: 12 }}
+              accessibilityLabel="Voltar para lista de conversas"
+            >
               <Ionicons name="arrow-back" size={24} color={Colors.textPrimary} />
             </TouchableOpacity>
           )}
@@ -308,120 +313,52 @@ export const ChatScreen: React.FC<ChatScreenProps> = ({
 
   return (
     <View style={styles.container}>
-      {/* Abas Superiores: Mensagens vs Notificações */}
-      <View style={styles.topTabBar}>
-        <TouchableOpacity
-          style={[styles.topTab, activeTab === 'messages' && styles.topTabActive]}
-          onPress={() => setActiveTab('messages')}
-          activeOpacity={0.8}
-        >
-          <Ionicons
-            name="chatbubbles-outline"
-            size={18}
-            color={activeTab === 'messages' ? Colors.primary : Colors.textSecondary}
-          />
-          <Text style={[styles.topTabText, activeTab === 'messages' && styles.topTabTextActive]}>
-            CONVERSAS ({conversations.length})
-          </Text>
-        </TouchableOpacity>
+      {/* Abas Superiores: Visíveis no Desktop, ou no Mobile apenas quando NENHUMA conversa estiver aberta */}
+      {(isWide || !selectedConv) && (
+        <View style={styles.topTabBar}>
+          <TouchableOpacity
+            style={[styles.topTab, activeTab === 'messages' && styles.topTabActive]}
+            onPress={() => setActiveTab('messages')}
+            activeOpacity={0.8}
+          >
+            <Ionicons
+              name="chatbubbles-outline"
+              size={18}
+              color={activeTab === 'messages' ? Colors.primary : Colors.textSecondary}
+            />
+            <Text style={[styles.topTabText, activeTab === 'messages' && styles.topTabTextActive]}>
+              CONVERSAS ({conversations.length})
+            </Text>
+          </TouchableOpacity>
 
-        <TouchableOpacity
-          style={[styles.topTab, activeTab === 'notifications' && styles.topTabActive]}
-          onPress={() => setActiveTab('notifications')}
-          activeOpacity={0.8}
-        >
-          <Ionicons
-            name="notifications-outline"
-            size={18}
-            color={activeTab === 'notifications' ? Colors.primary : Colors.textSecondary}
-          />
-          <Text style={[styles.topTabText, activeTab === 'notifications' && styles.topTabTextActive]}>
-            NOTIFICAÇÕES ({notifications.filter((n) => !n.read).length})
-          </Text>
-        </TouchableOpacity>
-      </View>
+          <TouchableOpacity
+            style={[styles.topTab, activeTab === 'notifications' && styles.topTabActive]}
+            onPress={() => setActiveTab('notifications')}
+            activeOpacity={0.8}
+          >
+            <Ionicons
+              name="notifications-outline"
+              size={18}
+              color={activeTab === 'notifications' ? Colors.primary : Colors.textSecondary}
+            />
+            <Text style={[styles.topTabText, activeTab === 'notifications' && styles.topTabTextActive]}>
+              NOTIFICAÇÕES ({notifications.filter((n) => !n.read).length})
+            </Text>
+          </TouchableOpacity>
+        </View>
+      )}
 
       {/* Conteúdo Principal */}
       <View style={styles.bodyLayout}>
-        {/* Painel da Esquerda (Lista de Conversas ou Notificações) */}
-        <View style={[styles.leftPane, isWide && selectedConv ? styles.leftPaneNarrow : null]}>
-          {activeTab === 'messages' && (
-            <FlatList
-              data={conversations}
-              keyExtractor={(item) => item.id}
-              contentContainerStyle={styles.listContent}
-              showsVerticalScrollIndicator={false}
-              initialNumToRender={10}
-              maxToRenderPerBatch={10}
-              windowSize={7}
-              removeClippedSubviews={Platform.OS !== 'web'}
-              refreshControl={
-                <RefreshControl
-                  refreshing={refreshing}
-                  onRefresh={() => {
-                    setRefreshing(true);
-                    loadData();
-                  }}
-                  colors={[Colors.primary]}
-                  tintColor={Colors.primary}
-                />
-              }
-              ListEmptyComponent={
-                <View style={styles.emptyContainer}>
-                  <Ionicons name="chatbubbles-outline" size={54} color={Colors.textSecondary} />
-                  <Text style={styles.emptyTitle}>Nenhuma conversa iniciada</Text>
-                  <Text style={styles.emptySub}>
-                    Inicie uma conversa a partir de um Match no feed ou através de uma candidatura recebida.
-                  </Text>
-                </View>
-              }
-              renderItem={({ item }) => {
-                const isSelected = selectedConv?.id === item.id;
-
-                return (
-                  <TouchableOpacity
-                    style={[styles.convCard, isSelected && styles.convCardActive]}
-                    onPress={() => openConversation(item)}
-                    activeOpacity={0.7}
-                  >
-                    <Image source={{ uri: item.avatar }} style={styles.avatarImg} />
-                    <View style={styles.convInfo}>
-                      <View style={styles.convHeaderRow}>
-                        <Text style={styles.convName} numberOfLines={1}>{item.contactName}</Text>
-                        <Text style={styles.convTime}>{item.lastTime}</Text>
-                      </View>
-                      <Text style={styles.convRole} numberOfLines={1}>{item.role}</Text>
-                      <Text style={styles.convLastMessage} numberOfLines={1}>
-                        {item.lastMessage}
-                      </Text>
-                    </View>
-                    {item.unreadCount > 0 && (
-                      <View style={styles.unreadBadge}>
-                        <Text style={styles.unreadBadgeText}>{item.unreadCount}</Text>
-                      </View>
-                    )}
-                  </TouchableOpacity>
-                );
-              }}
-            />
-          )}
-
-          {activeTab === 'notifications' && (
-            <View style={{ flex: 1 }}>
-              {notifications.length > 0 && (
-                <View style={styles.notifActionsBar}>
-                  <TouchableOpacity
-                    onPress={handleMarkAllNotificationsRead}
-                    style={styles.markAllReadBtn}
-                  >
-                    <Ionicons name="checkmark-done-outline" size={16} color={Colors.primary} />
-                    <Text style={styles.markAllReadText}>Marcar todas como lidas</Text>
-                  </TouchableOpacity>
-                </View>
-              )}
-
+        {/* Painel da Esquerda (Lista de Conversas ou Notificações):
+            - No Desktop: sempre visível (coluna lateral)
+            - No Mobile: visível apenas quando nenhuma conversa está aberta
+        */}
+        {(isWide || !selectedConv) && (
+          <View style={[styles.leftPane, isWide ? styles.leftPaneWide : styles.leftPaneFull]}>
+            {activeTab === 'messages' && (
               <FlatList
-                data={notifications}
+                data={conversations}
                 keyExtractor={(item) => item.id}
                 contentContainerStyle={styles.listContent}
                 showsVerticalScrollIndicator={false}
@@ -429,61 +366,130 @@ export const ChatScreen: React.FC<ChatScreenProps> = ({
                 maxToRenderPerBatch={10}
                 windowSize={7}
                 removeClippedSubviews={Platform.OS !== 'web'}
+                refreshControl={
+                  <RefreshControl
+                    refreshing={refreshing}
+                    onRefresh={() => {
+                      setRefreshing(true);
+                      loadData();
+                    }}
+                    colors={[Colors.primary]}
+                    tintColor={Colors.primary}
+                  />
+                }
                 ListEmptyComponent={
                   <View style={styles.emptyContainer}>
-                    <Ionicons name="notifications-off-outline" size={54} color={Colors.textSecondary} />
-                    <Text style={styles.emptyTitle}>Nenhuma notificação</Text>
+                    <Ionicons name="chatbubbles-outline" size={54} color={Colors.textSecondary} />
+                    <Text style={styles.emptyTitle}>Nenhuma conversa iniciada</Text>
                     <Text style={styles.emptySub}>
-                      Você receberá avisos quando suas candidaturas avançarem, entrevistas forem agendadas ou houver novos matches.
+                      Inicie uma conversa a partir de um Match no feed ou através de uma candidatura recebida.
                     </Text>
                   </View>
                 }
-                renderItem={({ item }) => (
-                  <TouchableOpacity
-                    style={[styles.notifCard, !item.read && styles.notifCardUnread]}
-                    onPress={() => handleMarkNotificationRead(item.id)}
-                    activeOpacity={0.8}
-                  >
-                    <View style={[styles.notifIconBox, { backgroundColor: getNotifColor(item.type).bg }]}>
-                      <Ionicons
-                        name={getNotifIcon(item.type) as any}
-                        size={20}
-                        color={getNotifColor(item.type).icon}
-                      />
-                    </View>
-                    <View style={styles.notifBody}>
-                      <View style={styles.notifTitleRow}>
-                        <Text style={[styles.notifTitle, !item.read && styles.notifTitleBold]} numberOfLines={1}>
-                          {item.title}
-                        </Text>
-                        <Text style={styles.notifTime}>{item.time}</Text>
-                      </View>
-                      <Text style={styles.notifDesc}>{item.description}</Text>
-                    </View>
-                    {!item.read && <View style={styles.notifDot} />}
-                  </TouchableOpacity>
-                )}
-              />
-            </View>
-          )}
-        </View>
+                renderItem={({ item }) => {
+                  const isSelected = selectedConv?.id === item.id;
 
-        {/* Painel da Direita (Visão Web: Chat Integrado) */}
-        {isWide && activeTab === 'messages' && (
-          <View style={styles.rightPane}>{renderChatArea()}</View>
+                  return (
+                    <TouchableOpacity
+                      style={[styles.convCard, isSelected && isWide && styles.convCardActive]}
+                      onPress={() => openConversation(item)}
+                      activeOpacity={0.7}
+                    >
+                      <Image source={{ uri: item.avatar }} style={styles.avatarImg} />
+                      <View style={styles.convInfo}>
+                        <View style={styles.convHeaderRow}>
+                          <Text style={styles.convName} numberOfLines={1}>{item.contactName}</Text>
+                          <Text style={styles.convTime}>{item.lastTime}</Text>
+                        </View>
+                        <Text style={styles.convRole} numberOfLines={1}>{item.role}</Text>
+                        <Text style={styles.convLastMessage} numberOfLines={1}>
+                          {item.lastMessage}
+                        </Text>
+                      </View>
+                      {item.unreadCount > 0 && (
+                        <View style={styles.unreadBadge}>
+                          <Text style={styles.unreadBadgeText}>{item.unreadCount}</Text>
+                        </View>
+                      )}
+                    </TouchableOpacity>
+                  );
+                }}
+              />
+            )}
+
+            {activeTab === 'notifications' && (
+              <View style={{ flex: 1 }}>
+                {notifications.length > 0 && (
+                  <View style={styles.notifActionsBar}>
+                    <TouchableOpacity
+                      onPress={handleMarkAllNotificationsRead}
+                      style={styles.markAllReadBtn}
+                    >
+                      <Ionicons name="checkmark-done-outline" size={16} color={Colors.primary} />
+                      <Text style={styles.markAllReadText}>Marcar todas como lidas</Text>
+                    </TouchableOpacity>
+                  </View>
+                )}
+
+                <FlatList
+                  data={notifications}
+                  keyExtractor={(item) => item.id}
+                  contentContainerStyle={styles.listContent}
+                  showsVerticalScrollIndicator={false}
+                  initialNumToRender={10}
+                  maxToRenderPerBatch={10}
+                  windowSize={7}
+                  removeClippedSubviews={Platform.OS !== 'web'}
+                  ListEmptyComponent={
+                    <View style={styles.emptyContainer}>
+                      <Ionicons name="notifications-off-outline" size={54} color={Colors.textSecondary} />
+                      <Text style={styles.emptyTitle}>Nenhuma notificação</Text>
+                      <Text style={styles.emptySub}>
+                        Você receberá avisos quando suas candidaturas avançarem, entrevistas forem agendadas ou houver novos matches.
+                      </Text>
+                    </View>
+                  }
+                  renderItem={({ item }) => (
+                    <TouchableOpacity
+                      style={[styles.notifCard, !item.read && styles.notifCardUnread]}
+                      onPress={() => handleMarkNotificationRead(item.id)}
+                      activeOpacity={0.8}
+                    >
+                      <View style={[styles.notifIconBox, { backgroundColor: getNotifColor(item.type).bg }]}>
+                        <Ionicons
+                          name={getNotifIcon(item.type) as any}
+                          size={20}
+                          color={getNotifColor(item.type).icon}
+                        />
+                      </View>
+                      <View style={styles.notifBody}>
+                        <View style={styles.notifTitleRow}>
+                          <Text style={[styles.notifTitle, !item.read && styles.notifTitleBold]} numberOfLines={1}>
+                            {item.title}
+                          </Text>
+                          <Text style={styles.notifTime}>{item.time}</Text>
+                        </View>
+                        <Text style={styles.notifDesc}>{item.description}</Text>
+                      </View>
+                      {!item.read && <View style={styles.notifDot} />}
+                    </TouchableOpacity>
+                  )}
+                />
+              </View>
+            )}
+          </View>
+        )}
+
+        {/* Painel da Direita (Chat):
+            - No Desktop: visível se activeTab === 'messages'
+            - No Mobile: visível ocupando 100% da tela quando uma conversa estiver selecionada
+        */}
+        {((isWide && activeTab === 'messages') || (!isWide && selectedConv)) && (
+          <View style={[styles.rightPane, !isWide ? styles.rightPaneFull : null]}>
+            {renderChatArea()}
+          </View>
         )}
       </View>
-
-      {/* Modal Mobile para Visualização da Conversa */}
-      {!isWide && (
-        <Modal
-          visible={!!selectedConv}
-          animationType="slide"
-          onRequestClose={() => setSelectedConv(null)}
-        >
-          {renderChatArea()}
-        </Modal>
-      )}
     </View>
   );
 };
@@ -561,14 +567,24 @@ const styles = StyleSheet.create({
     flex: 1,
     backgroundColor: '#F8FAFC',
   },
-  leftPaneNarrow: {
+  leftPaneFull: {
+    flex: 1,
+    width: '100%',
+  },
+  leftPaneWide: {
+    width: 340,
     maxWidth: 380,
+    flex: undefined,
     borderRightWidth: 1,
     borderRightColor: '#E2E8F0',
   },
   rightPane: {
-    flex: 2,
+    flex: 1,
     backgroundColor: '#FFFFFF',
+  },
+  rightPaneFull: {
+    flex: 1,
+    width: '100%',
   },
   listContent: {
     padding: 16,
