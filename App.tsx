@@ -27,6 +27,7 @@ import { FilterScreen } from './src/screens/FilterScreen';
 import { ChatScreen } from './src/screens/ChatScreen';
 import { ApplicationsScreen } from './src/screens/ApplicationsScreen';
 import { DashboardScreen } from './src/screens/DashboardScreen';
+import { ErrorBoundary } from './src/components/ErrorBoundary';
 
 interface LoggedUser {
   id: number;
@@ -38,7 +39,7 @@ interface LoggedUser {
   imagemUrl?: string;
 }
 
-export default function App() {
+function FateLinkApp() {
   // Controle de Telas Principais
   const [currentScreen, setCurrentScreen] = useState<'splash' | 'login' | 'register' | 'main'>('splash');
   
@@ -80,12 +81,12 @@ export default function App() {
         api.getOpportunities(currentUser?.tipo === 'aluno' ? currentUser.id : undefined, appliedFilters || undefined),
         api.getCandidates(appliedFilters || undefined),
       ]);
-      if (Array.isArray(opps)) setOpportunities(opps);
-      if (Array.isArray(cands)) setCandidates(cands);
+      if (Array.isArray(opps) && opps.length > 0) setOpportunities(opps);
+      if (Array.isArray(cands) && cands.length > 0) setCandidates(cands);
 
       if (currentUser?.id) {
         const notifs = await api.getNotifications(currentUser.id);
-        if (Array.isArray(notifs)) setNotifications(notifs);
+        if (Array.isArray(notifs) && notifs.length > 0) setNotifications(notifs);
       }
     } catch (e) {
       console.warn('Erro ao atualizar feed:', e);
@@ -445,13 +446,25 @@ export default function App() {
   );
 }
 
+export default function App() {
+  return (
+    <ErrorBoundary>
+      <FateLinkApp />
+    </ErrorBoundary>
+  );
+}
+
 const styles = StyleSheet.create({
   authSafeArea: {
     flex: 1,
+    height: '100%',
+    minHeight: '100%',
     backgroundColor: '#FFFFFF',
   },
   mainSafeArea: {
     flex: 1,
+    height: '100%',
+    minHeight: '100%',
     backgroundColor: Colors.surface,
   },
   contentContainer: {

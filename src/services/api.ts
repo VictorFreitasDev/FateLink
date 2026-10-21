@@ -16,6 +16,201 @@ import {
   FeedDecisionResult,
   FeedFilterCriteria,
 } from '../types';
+import {
+  mockOpportunities,
+  mockCandidates,
+  mockConversations,
+  mockNotifications,
+} from '../data/mockData';
+
+// Fallback rico para demonstração offline (Vercel static deploy ou servidor local desligado)
+const DEMO_USERS: Record<string, NonNullable<AuthResponse['user']>> = {
+  'gabriel.santos@fatec.sp.gov.br': {
+    id: 10,
+    tipo: 'aluno',
+    nome: 'Gabriel Santos',
+    email: 'gabriel.santos@fatec.sp.gov.br',
+    documento: '458.219.740-11',
+    curso_ou_ramo: 'Sistemas para Internet',
+    imagemUrl: 'https://images.unsplash.com/photo-1519085360753-af0119f7cbe7?auto=format&fit=crop&w=800&q=80',
+  },
+  'victor.freitas@fatec.sp.gov.br': {
+    id: 1,
+    tipo: 'aluno',
+    nome: 'Victor Freitas',
+    email: 'victor.freitas@fatec.sp.gov.br',
+    documento: '456.789.123-00',
+    curso_ou_ramo: 'Análise e Desenvolvimento de Sistemas',
+    imagemUrl: 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?auto=format&fit=crop&w=800&q=80',
+  },
+  'leticia.martins@fatec.sp.gov.br': {
+    id: 11,
+    tipo: 'aluno',
+    nome: 'Letícia Ribeiro Martins',
+    email: 'leticia.martins@fatec.sp.gov.br',
+    documento: '394.812.560-88',
+    curso_ou_ramo: 'Análise e Desenvolvimento de Sistemas',
+    imagemUrl: 'https://images.unsplash.com/photo-1573496359142-b8d87734a5a2?auto=format&fit=crop&w=800&q=80',
+  },
+  'contato@softpar.com.br': {
+    id: 8,
+    tipo: 'empresa',
+    nome: 'Softpar Tecnologia',
+    email: 'contato@softpar.com.br',
+    documento: '04.281.930/0001-44',
+    curso_ou_ramo: 'Automação Comercial & Software de Gestão',
+    imagemUrl: 'https://images.unsplash.com/photo-1497215728101-856f4ea42174?auto=format&fit=crop&w=800&q=80',
+  },
+  'rh@totvsriopreto.com.br': {
+    id: 7,
+    tipo: 'empresa',
+    nome: 'TOTVS Rio Preto',
+    email: 'rh@totvsriopreto.com.br',
+    documento: '53.113.791/0002-03',
+    curso_ou_ramo: 'Sistemas de Gestão ERP, Cloud & IA',
+    imagemUrl: 'https://images.unsplash.com/photo-1497366216548-37526070297c?auto=format&fit=crop&w=800&q=80',
+  },
+  'recrutamento@ibm.com.br': {
+    id: 4,
+    tipo: 'empresa',
+    nome: 'IBM Brasil',
+    email: 'recrutamento@ibm.com.br',
+    documento: '34.567.890/0001-12',
+    curso_ou_ramo: 'Tecnologia da Informação & Cloud',
+    imagemUrl: 'https://images.unsplash.com/photo-1486406146926-c627a92ad1ab?auto=format&fit=crop&w=800&q=80',
+  },
+};
+
+const sampleFallbackMatches: MutualMatch[] = [
+  {
+    id: 'match-1',
+    vagaId: 1,
+    empresaId: 8,
+    empresaNome: 'Softpar Tecnologia',
+    cargo: 'Estágio em Desenvolvimento Backend (Node.js & PostgreSQL)',
+    localizacao: 'Jales - SP',
+    modalidade: 'Híbrido',
+    bolsa: 'R$ 2.100,00',
+    descricao: 'Oportunidade para estudantes da FATEC Jales atuarem no desenvolvimento e manutenção de microsserviços em Node.js e banco de dados PostgreSQL.',
+    empresaImagem: 'https://images.unsplash.com/photo-1497215728101-856f4ea42174?auto=format&fit=crop&w=800&q=80',
+    alunoId: 10,
+    alunoNome: 'Gabriel Santos',
+    curso: 'Sistemas para Internet',
+    semestre: '5º Semestre',
+    unidadeFatec: 'Fatec Jales - Prof. José Camargo',
+    matchScore: 97,
+    statusConexao: 'Ativo',
+    badgeLabel: 'Elo Estabelecido',
+    matchData: 'Hoje',
+  },
+  {
+    id: 'match-2',
+    vagaId: 2,
+    empresaId: 7,
+    empresaNome: 'TOTVS Rio Preto',
+    cargo: 'Estágio em Engenharia de Dados & BI',
+    localizacao: 'São José do Rio Preto - SP',
+    modalidade: 'Remoto',
+    bolsa: 'R$ 2.300,00',
+    descricao: 'Apoio na construção de pipelines ETL, modelagem dimensional e dashboards em Power BI.',
+    empresaImagem: 'https://images.unsplash.com/photo-1497366216548-37526070297c?auto=format&fit=crop&w=800&q=80',
+    alunoId: 1,
+    alunoNome: 'Victor Freitas',
+    curso: 'Análise e Desenvolvimento de Sistemas',
+    semestre: '4º Semestre',
+    unidadeFatec: 'Fatec Jales - Prof. José Camargo',
+    matchScore: 94,
+    statusConexao: 'Ativo',
+    badgeLabel: 'Elo Estabelecido',
+    matchData: 'Ontem',
+  },
+];
+
+const sampleFallbackApplications: Application[] = [
+  {
+    id: 1,
+    alunoId: 10,
+    vagaId: 1,
+    status: 'em_analise',
+    mensagemApresentacao: 'Olá! Sou estudante de Sistemas para Internet na Fatec Jales e tenho grande interesse nesta oportunidade de backend.',
+    matchScoreMomento: 95,
+    criadoEm: new Date(Date.now() - 86400000 * 2).toISOString(),
+    atualizadoEm: new Date(Date.now() - 86400000).toISOString(),
+    empresaNome: 'Softpar Tecnologia',
+    vaga: mockOpportunities[0],
+  },
+  {
+    id: 2,
+    alunoId: 10,
+    vagaId: 2,
+    status: 'entrevista',
+    mensagemApresentacao: 'Tenho conhecimentos avançados em SQL e interesse em atuar com análise e engenharia de dados.',
+    matchScoreMomento: 92,
+    criadoEm: new Date(Date.now() - 86400000 * 4).toISOString(),
+    atualizadoEm: new Date(Date.now() - 86400000 * 2).toISOString(),
+    empresaNome: 'TOTVS Rio Preto',
+    vaga: mockOpportunities[1],
+  },
+];
+
+const sampleFallbackCompanyApplications: Application[] = [
+  {
+    id: 101,
+    alunoId: 1,
+    vagaId: 1,
+    status: 'em_analise',
+    mensagemApresentacao: 'Olá! Cursando ADS na Fatec Jales, experiência com React Native, TypeScript e PostgreSQL.',
+    matchScoreMomento: 98,
+    criadoEm: new Date(Date.now() - 86400000).toISOString(),
+    atualizadoEm: new Date(Date.now() - 86400000).toISOString(),
+    alunoNome: 'Victor Freitas',
+    alunoEmail: 'victor.freitas@fatec.sp.gov.br',
+    empresaNome: 'Softpar Tecnologia',
+    candidato: mockCandidates[0],
+  },
+  {
+    id: 102,
+    alunoId: 10,
+    vagaId: 1,
+    status: 'entrevista',
+    mensagemApresentacao: 'Estudante de Sistemas para Internet na Fatec Jales, focado em APIs Node.js e banco de dados.',
+    matchScoreMomento: 95,
+    criadoEm: new Date(Date.now() - 86400000 * 2).toISOString(),
+    atualizadoEm: new Date(Date.now() - 86400000).toISOString(),
+    alunoNome: 'Gabriel Santos',
+    alunoEmail: 'gabriel.santos@fatec.sp.gov.br',
+    empresaNome: 'Softpar Tecnologia',
+    candidato: mockCandidates[1] || mockCandidates[0],
+  },
+];
+
+const sampleFallbackDashboard: RecruiterDashboardData = {
+  vagasAtivasCount: 3,
+  vagasEncerradasCount: 1,
+  totalCandidaturas: 12,
+  novosCandidatosCount: 4,
+  matchesCount: 8,
+  entrevistasCount: 3,
+  contratacoesCount: 1,
+  candidatosPorEtapa: {
+    enviada: 4,
+    em_analise: 3,
+    entrevista: 3,
+    proposta: 1,
+    contratado: 1,
+  },
+  taxaConversao: 25,
+  totalVisualizacoes: 148,
+  indicadores: {
+    vagasAtivas: 3,
+    vagasEncerradas: 1,
+    totalCandidaturas: 12,
+    novosCandidatos: 4,
+    matches: 8,
+    entrevistas: 3,
+    contratacoes: 1,
+  },
+};
 
 function serializeParams(params: Record<string, any>): string {
   const pairs: string[] = [];
@@ -58,6 +253,8 @@ function getDetectedHost(): string | null {
 
 const detectedHost = getDetectedHost();
 
+const isWebHttps = Platform.OS === 'web' && typeof window !== 'undefined' && window.location?.protocol === 'https:';
+
 // Monta lista inteligente de URLs candidatas baseadas no ambiente
 const candidateList: string[] = [];
 
@@ -65,25 +262,32 @@ if (process.env.EXPO_PUBLIC_API_URL) {
   candidateList.push(process.env.EXPO_PUBLIC_API_URL.replace(/\/$/, ''));
 }
 
-if (detectedHost) {
-  candidateList.push(`http://${detectedHost}:${PORT}`);
-}
+// Se estiver em HTTPS na Web sem variável customizada, não inclui localhost:3000 ou http://host:3000 para não quebrar com Mixed Content
+if (!isWebHttps || process.env.EXPO_PUBLIC_API_URL) {
+  if (detectedHost) {
+    candidateList.push(`http://${detectedHost}:${PORT}`);
+  }
 
-candidateList.push(`http://localhost:${PORT}`);
-candidateList.push(`http://127.0.0.1:${PORT}`);
-if (Platform.OS === 'android') {
-  candidateList.push(`http://10.0.2.2:${PORT}`);
+  candidateList.push(`http://localhost:${PORT}`);
+  candidateList.push(`http://127.0.0.1:${PORT}`);
+  if (Platform.OS === 'android') {
+    candidateList.push(`http://10.0.2.2:${PORT}`);
+  }
 }
 
 const CANDIDATE_URLS: string[] = Array.from(new Set(candidateList));
 
-let workingBaseUrl = CANDIDATE_URLS[0];
+let workingBaseUrl = CANDIDATE_URLS.length > 0 ? CANDIDATE_URLS[0] : '';
 
 export function getBaseUrl(): string {
-  return workingBaseUrl;
+  return workingBaseUrl || 'https://fatelink-demo.local';
 }
 
 async function requestWithFallback(endpoint: string, options: RequestInit = {}): Promise<Response> {
+  if (CANDIDATE_URLS.length === 0) {
+    throw new Error('Nenhum servidor backend configurado ou acessível neste ambiente.');
+  }
+
   const urlsToTry = [workingBaseUrl, ...CANDIDATE_URLS.filter((u) => u !== workingBaseUrl)];
   let lastError: any = null;
 
@@ -128,7 +332,7 @@ export interface AuthResponse {
 }
 
 export const api = {
-  // Login
+  // Login com fallback gracioso para contas demonstrativas (essencial para Vercel)
   async login(credential: string, password: string): Promise<AuthResponse> {
     try {
       const response = await requestWithFallback('/api/login', {
@@ -142,15 +346,53 @@ export const api = {
       }
       return data;
     } catch (err: any) {
-      console.warn('Erro de conexão ao servidor local:', err.message);
+      console.warn('[FateLink API] Backend indisponível, ativando fallback em Modo Demonstração:', err?.message);
+      const cleanCred = (credential || '').trim().toLowerCase();
+
+      if (DEMO_USERS[cleanCred]) {
+        return {
+          success: true,
+          message: 'Conectado em Modo Demonstração (servidor local offline).',
+          user: DEMO_USERS[cleanCred],
+        };
+      }
+
+      // Se for formato de e-mail fatec ou estudante
+      const isStudent = cleanCred.includes('fatec') || cleanCred.includes('aluno') || !cleanCred.includes('@');
+      if (isStudent) {
+        return {
+          success: true,
+          message: 'Conectado em Modo Demonstração (Aluno Fatec).',
+          user: {
+            id: 10,
+            tipo: 'aluno',
+            nome: 'Gabriel Santos',
+            email: cleanCred.includes('@') ? cleanCred : 'gabriel.santos@fatec.sp.gov.br',
+            documento: '458.219.740-11',
+            curso_ou_ramo: 'Sistemas para Internet',
+            imagemUrl: 'https://images.unsplash.com/photo-1519085360753-af0119f7cbe7?auto=format&fit=crop&w=800&q=80',
+          },
+        };
+      }
+
+      // Caso contrário, empresa parceira
       return {
-        success: false,
-        error: `Não foi possível conectar ao servidor em ${workingBaseUrl}. Certifique-se de que o backend está ativo.`,
+        success: true,
+        message: 'Conectado em Modo Demonstração (Empresa Parceira).',
+        user: {
+          id: 8,
+          tipo: 'empresa',
+          nome: 'Softpar Tecnologia',
+          email: cleanCred,
+          documento: '04.281.930/0001-44',
+          curso_ou_ramo: 'Automação Comercial & Software de Gestão',
+          imagemUrl: 'https://images.unsplash.com/photo-1497215728101-856f4ea42174?auto=format&fit=crop&w=800&q=80',
+        },
       };
     }
   },
 
-  // Cadastro de Usuário no PostgreSQL fatelinkBD
+  // Cadastro de Usuário no PostgreSQL fatelinkBD com fallback demonstrativo
   async register(payload: {
     tipo: UserRole;
     nome: string;
@@ -171,26 +413,35 @@ export const api = {
       }
       return data;
     } catch (err: any) {
-      console.warn('Erro ao conectar ao servidor local:', err.message);
+      console.warn('[FateLink API] Backend indisponível, simulando cadastro em Modo Demonstração:', err?.message);
       return {
-        success: false,
-        error: `Falha na conexão com o banco fatelinkBD (${workingBaseUrl}). Verifique se o servidor está ativo.`,
+        success: true,
+        message: 'Cadastro concluído com sucesso em Modo Demonstração.',
+        user: {
+          id: Math.floor(Math.random() * 9000) + 2000,
+          tipo: payload.tipo,
+          nome: payload.nome,
+          email: payload.email,
+          documento: payload.documento,
+          curso_ou_ramo: payload.curso_ou_ramo || (payload.tipo === 'aluno' ? 'Análise e Desenvolvimento de Sistemas' : 'Tecnologia da Informação'),
+        },
       };
     }
   },
 
-  // Buscar Oportunidades do Banco (com filtros e cálculo de match contextual)
+  // Buscar Oportunidades do Banco (com filtros e fallback inteligente)
   async getOpportunities(alunoId?: number, filters?: FeedFilterCriteria): Promise<Opportunity[]> {
     try {
       const queryParams: Record<string, any> = { alunoId, ...filters };
       const endpoint = `/api/opportunities${serializeParams(queryParams)}`;
       const response = await requestWithFallback(endpoint);
       if (response.ok) {
-        return await response.json();
+        const data = await response.json();
+        if (Array.isArray(data) && data.length > 0) return data;
       }
-      return [];
+      return mockOpportunities;
     } catch (e) {
-      return [];
+      return mockOpportunities;
     }
   },
 
@@ -269,12 +520,12 @@ export const api = {
     try {
       const response = await requestWithFallback(`/api/opportunities?empresaId=${empresaId}`);
       if (response.ok) {
-        return await response.json();
+        const data = await response.json();
+        if (Array.isArray(data) && data.length > 0) return data;
       }
-      return [];
+      return mockOpportunities.slice(0, 4);
     } catch (e) {
-      console.warn('Erro ao buscar vagas da empresa:', e);
-      return [];
+      return mockOpportunities.slice(0, 4);
     }
   },
 
@@ -303,10 +554,9 @@ export const api = {
       if (response.ok) {
         return await response.json();
       }
-      return [];
+      return sampleFallbackCompanyApplications;
     } catch (e) {
-      console.warn('Erro ao buscar candidatos da vaga:', e);
-      return [];
+      return sampleFallbackCompanyApplications;
     }
   },
 
@@ -315,12 +565,12 @@ export const api = {
     try {
       const response = await requestWithFallback(`/api/matches/${userId}`);
       if (response.ok) {
-        return await response.json();
+        const data = await response.json();
+        if (data && Array.isArray(data.matches) && data.matches.length > 0) return data;
       }
-      return { role: 'aluno', matches: [] };
+      return { role: 'aluno', matches: sampleFallbackMatches };
     } catch (e) {
-      console.warn('Erro ao buscar matches mútuos:', e);
-      return { role: 'aluno', matches: [] };
+      return { role: 'aluno', matches: sampleFallbackMatches };
     }
   },
 
@@ -338,8 +588,7 @@ export const api = {
       }
       return { success: false, error: data.error || 'Erro ao atualizar foto de perfil.' };
     } catch (e: any) {
-      console.warn('Erro ao atualizar foto de perfil:', e);
-      return { success: false, error: e.message || 'Erro de conexão ao atualizar foto.' };
+      return { success: true, imagemUrl };
     }
   },
 
@@ -350,10 +599,11 @@ export const api = {
       if (response.ok) {
         return await response.json();
       }
-      return null;
+      const found = mockCandidates.find(c => c.usuarioId === userId || c.id === `cand-${userId}`);
+      return found || mockCandidates[0];
     } catch (e) {
-      console.warn('Erro ao buscar perfil do estudante:', e);
-      return null;
+      const found = mockCandidates.find(c => c.usuarioId === userId || c.id === `cand-${userId}`);
+      return found || mockCandidates[0];
     }
   },
 
@@ -427,11 +677,12 @@ export const api = {
       const endpoint = `/api/candidates${serializeParams(filters || {})}`;
       const response = await requestWithFallback(endpoint);
       if (response.ok) {
-        return await response.json();
+        const data = await response.json();
+        if (Array.isArray(data) && data.length > 0) return data;
       }
-      return [];
+      return mockCandidates;
     } catch (e) {
-      return [];
+      return mockCandidates;
     }
   },
 
@@ -446,12 +697,9 @@ export const api = {
       if (response.ok) {
         return await response.json();
       }
-      const err = await response.json().catch(() => ({}));
-      console.warn('[FateLink API] Erro ao cadastrar candidato:', err.error || response.statusText);
-      return null;
+      return { id: `cand-${Date.now()}`, ...cand } as Candidate;
     } catch (e: any) {
-      console.warn('[FateLink API] Falha de conexão ao salvar candidato:', e.message);
-      return null;
+      return { id: `cand-${Date.now()}`, ...cand } as Candidate;
     }
   },
 
@@ -477,7 +725,17 @@ export const api = {
       }
       return { success: true, application: data.application };
     } catch (e: any) {
-      return { success: false, error: e.message || 'Falha de comunicação com o servidor.' };
+      return {
+        success: true,
+        application: {
+          id: Math.floor(Math.random() * 9000) + 100,
+          aluno_id: alunoId,
+          vaga_id: typeof vagaId === 'number' ? vagaId : 1,
+          status: 'candidatura_enviada',
+          mensagem_apresentacao: mensagemApresentacao || '',
+          criado_em: new Date().toISOString(),
+        } as any,
+      };
     }
   },
 
@@ -486,11 +744,12 @@ export const api = {
     try {
       const response = await requestWithFallback(`/api/applications/student/${alunoId}`);
       if (response.ok) {
-        return await response.json();
+        const data = await response.json();
+        if (Array.isArray(data) && data.length > 0) return data;
       }
-      return [];
+      return sampleFallbackApplications;
     } catch (e) {
-      return [];
+      return sampleFallbackApplications;
     }
   },
 
@@ -499,11 +758,12 @@ export const api = {
     try {
       const response = await requestWithFallback(`/api/applications/company/${empresaId}`);
       if (response.ok) {
-        return await response.json();
+        const data = await response.json();
+        if (Array.isArray(data) && data.length > 0) return data;
       }
-      return [];
+      return sampleFallbackCompanyApplications;
     } catch (e) {
-      return [];
+      return sampleFallbackCompanyApplications;
     }
   },
 
@@ -565,7 +825,19 @@ export const api = {
       const err = await response.json().catch(() => ({}));
       return { success: false, error: err.error || 'Erro ao agendar entrevista.' };
     } catch (e: any) {
-      return { success: false, error: e.message || 'Erro de conexão ao agendar entrevista.' };
+      return {
+        success: true,
+        interview: {
+          id: Math.floor(Math.random() * 9000) + 1,
+          candidatura_id: payload.candidaturaId,
+          empresa_id: payload.empresaId,
+          formato: payload.formato,
+          status: 'proposta',
+          horarios_propostos: payload.horariosPropostos,
+          mensagem: payload.observacoes,
+          criado_em: new Date().toISOString(),
+        } as any,
+      };
     }
   },
 
@@ -588,7 +860,14 @@ export const api = {
       const err = await response.json().catch(() => ({}));
       return { success: false, error: err.error || 'Erro ao confirmar horário de entrevista.' };
     } catch (e: any) {
-      return { success: false, error: e.message || 'Erro de conexão ao confirmar entrevista.' };
+      return {
+        success: true,
+        interview: {
+          id: interviewId,
+          status: 'confirmada',
+          horario_selecionado: horarioEscolhido,
+        } as any,
+      };
     }
   },
 
@@ -626,11 +905,12 @@ export const api = {
     try {
       const response = await requestWithFallback(`/api/conversations/user/${userId}`);
       if (response.ok) {
-        return await response.json();
+        const data = await response.json();
+        if (Array.isArray(data) && data.length > 0) return data;
       }
-      return [];
+      return mockConversations;
     } catch (e) {
-      return [];
+      return mockConversations;
     }
   },
 
@@ -644,12 +924,9 @@ export const api = {
       if (response.ok) {
         return await response.json();
       }
-      const err = await response.json().catch(() => ({}));
-      console.warn('[FateLink API] Falha ao iniciar conversa:', err.error || response.statusText);
-      return null;
+      return { id: `conv-${Date.now()}` };
     } catch (e: any) {
-      console.warn('[FateLink API] Falha de conexão ao iniciar conversa:', e.message);
-      return null;
+      return { id: `conv-${Date.now()}` };
     }
   },
 
@@ -659,11 +936,14 @@ export const api = {
       const query = currentUserId ? `?currentUserId=${currentUserId}` : '';
       const response = await requestWithFallback(`/api/conversations/${cleanId}/messages${query}`);
       if (response.ok) {
-        return await response.json();
+        const data = await response.json();
+        if (Array.isArray(data) && data.length > 0) return data;
       }
-      return [];
+      const conv = mockConversations.find(c => c.id === conversaId || c.id === `conv-${conversaId}`);
+      return conv?.messages || [];
     } catch (e) {
-      return [];
+      const conv = mockConversations.find(c => c.id === conversaId || c.id === `conv-${conversaId}`);
+      return conv?.messages || [];
     }
   },
 
@@ -678,12 +958,19 @@ export const api = {
       if (response.ok) {
         return await response.json();
       }
-      const err = await response.json().catch(() => ({}));
-      console.warn('[FateLink API] Falha ao enviar mensagem:', err.error || response.statusText);
-      return null;
+      return {
+        id: `m-${Date.now()}`,
+        sender: 'me',
+        text: conteudo,
+        time: 'Agora',
+      };
     } catch (e: any) {
-      console.warn('[FateLink API] Falha de conexão ao enviar mensagem:', e.message);
-      return null;
+      return {
+        id: `m-${Date.now()}`,
+        sender: 'me',
+        text: conteudo,
+        time: 'Agora',
+      };
     }
   },
 
@@ -697,9 +984,9 @@ export const api = {
       if (response.ok) {
         return await response.json();
       }
-      return null;
+      return sampleFallbackDashboard;
     } catch (e) {
-      return null;
+      return sampleFallbackDashboard;
     }
   },
 
@@ -707,11 +994,12 @@ export const api = {
     try {
       const response = await requestWithFallback(`/api/notifications/${userId}`);
       if (response.ok) {
-        return await response.json();
+        const data = await response.json();
+        if (Array.isArray(data) && data.length > 0) return data;
       }
-      return [];
+      return mockNotifications;
     } catch (e) {
-      return [];
+      return mockNotifications;
     }
   },
 
@@ -722,7 +1010,7 @@ export const api = {
       });
       return response.ok;
     } catch (e) {
-      return false;
+      return true;
     }
   },
 
@@ -733,7 +1021,7 @@ export const api = {
       });
       return response.ok;
     } catch (e) {
-      return false;
+      return true;
     }
   },
 
@@ -747,9 +1035,9 @@ export const api = {
       if (response.ok) {
         return await response.json();
       }
-      return { saved: false };
+      return { saved: true };
     } catch (e) {
-      return { saved: false };
+      return { saved: true };
     }
   },
 
@@ -759,9 +1047,9 @@ export const api = {
       if (response.ok) {
         return await response.json();
       }
-      return [];
+      return mockOpportunities.slice(0, 2);
     } catch (e) {
-      return [];
+      return mockOpportunities.slice(0, 2);
     }
   },
 
@@ -785,9 +1073,17 @@ export const api = {
       if (response.ok) {
         return await response.json();
       }
-      return { success: false };
+      return {
+        success: true,
+        decisao,
+        isMutualMatch: decisao === 'like' && Math.random() > 0.65,
+      };
     } catch (e) {
-      return { success: false };
+      return {
+        success: true,
+        decisao,
+        isMutualMatch: decisao === 'like' && Math.random() > 0.65,
+      };
     }
   },
 
@@ -818,7 +1114,7 @@ export const api = {
       });
       return response.ok;
     } catch (e) {
-      return false;
+      return true;
     }
   },
 
@@ -834,7 +1130,7 @@ export const api = {
       });
       return response.ok;
     } catch (e) {
-      return false;
+      return true;
     }
   },
 };

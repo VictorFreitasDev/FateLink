@@ -28,6 +28,7 @@
     "typescript": "~6.0.3"
   },
   "scripts": {
+    "build": "expo export --platform web",
     "start": "expo start",
     "server": "node server/index.js",
     "test": "node server/tests/feedImmersive.test.js && node server/tests/matchEngine.test.js && node server/tests/candidateProfile.test.js && node server/tests/recruiterDashboard.test.js && node server/tests/communicationAndApplications.test.js && node server/tests/designSystemTokens.test.js && node server/tests/e2eFullFlows.test.js",
