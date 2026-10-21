@@ -29,6 +29,14 @@ interface RegisterScreenProps {
   onNavigateToLogin: () => void;
 }
 
+const CURSOS_FATEC_JALES = [
+  'Análise e Desenvolvimento de Sistemas',
+  'Agronegócio',
+  'Gestão Empresarial (Presencial)',
+  'Gestão Empresarial (EaD)',
+  'Sistemas para Internet',
+];
+
 export const RegisterScreen: React.FC<RegisterScreenProps> = ({
   onRegisterSuccess,
   onNavigateToLogin,
@@ -302,12 +310,32 @@ export const RegisterScreen: React.FC<RegisterScreenProps> = ({
             />
             <TextInput
               style={styles.input}
-              placeholder={role === 'aluno' ? 'CURSO FATEC (ex: ADS, DSM, GTI)' : 'RAMO DE ATUAÇÃO (ex: Tecnologia)'}
+              placeholder={role === 'aluno' ? 'CURSO FATEC JALES' : 'RAMO DE ATUAÇÃO (ex: Tecnologia)'}
               placeholderTextColor={Colors.placeholder}
               value={extraInfo}
               onChangeText={setExtraInfo}
             />
           </View>
+
+          {role === 'aluno' && (
+            <View style={styles.coursePillsContainer}>
+              {CURSOS_FATEC_JALES.map((c) => {
+                const isSelected = extraInfo === c;
+                return (
+                  <TouchableOpacity
+                    key={c}
+                    style={[styles.coursePill, isSelected && styles.coursePillActive]}
+                    onPress={() => setExtraInfo(c)}
+                    activeOpacity={0.7}
+                  >
+                    <Text style={[styles.coursePillText, isSelected && styles.coursePillTextActive]}>
+                      {c}
+                    </Text>
+                  </TouchableOpacity>
+                );
+              })}
+            </View>
+          )}
 
           {/* Senha em texto puro no banco */}
           <View style={[styles.inputWrapper, isPasswordValid && styles.inputWrapperValid]}>
@@ -374,6 +402,9 @@ const styles = StyleSheet.create({
     paddingTop: 16,
     paddingBottom: 24,
     alignItems: 'center',
+    maxWidth: 520,
+    width: '100%',
+    alignSelf: 'center',
   },
   backButton: {
     alignSelf: 'flex-start',
@@ -484,6 +515,34 @@ const styles = StyleSheet.create({
     marginBottom: 10,
     borderWidth: 1,
     borderColor: 'transparent',
+  },
+  coursePillsContainer: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 6,
+    marginBottom: 12,
+    marginTop: -4,
+  },
+  coursePill: {
+    backgroundColor: '#F1F5F9',
+    borderRadius: 8,
+    paddingVertical: 5,
+    paddingHorizontal: 10,
+    borderWidth: 1,
+    borderColor: '#E2E8F0',
+  },
+  coursePillActive: {
+    backgroundColor: '#EFF6FF',
+    borderColor: Colors.primary,
+  },
+  coursePillText: {
+    fontSize: 11,
+    fontWeight: '600',
+    color: Colors.textSecondary,
+  },
+  coursePillTextActive: {
+    color: Colors.primary,
+    fontWeight: '700',
   },
   inputWrapperValid: {
     borderColor: 'rgba(16, 185, 129, 0.4)',

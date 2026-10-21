@@ -12,11 +12,14 @@ import {
   Platform,
   ActivityIndicator,
   RefreshControl,
+  Dimensions,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { Colors } from '../theme/colors';
 import { Conversation, NotificationItem, ChatMessage } from '../types';
 import { api } from '../services/api';
+
+const { width: SCREEN_WIDTH } = Dimensions.get('window');
 
 interface ChatScreenProps {
   currentUserId?: number;
@@ -25,7 +28,7 @@ interface ChatScreenProps {
 }
 
 export const ChatScreen: React.FC<ChatScreenProps> = ({
-  currentUserId = 1,
+  currentUserId,
   activeChatTarget,
   onClearTarget,
 }) => {
@@ -40,6 +43,7 @@ export const ChatScreen: React.FC<ChatScreenProps> = ({
   const [sending, setSending] = useState(false);
 
   const flatListRef = useRef<FlatList>(null);
+  const isWide = Platform.OS === 'web' && SCREEN_WIDTH >= 820;
 
   // Carregar conversas e notificações do PostgreSQL
   const loadData = async () => {
@@ -65,7 +69,7 @@ export const ChatScreen: React.FC<ChatScreenProps> = ({
 
   // Se veio redirecionado de um Card/Match com alvo específico
   useEffect(() => {
-    if (activeChatTarget) {
+    if (activeChatTarget && currentUserId) {
       const targetName = activeChatTarget.name.toLowerCase();
       const existing = conversations.find(
         (c) => c.contactName.toLowerCase() === targetName
@@ -73,38 +77,83 @@ export const ChatScreen: React.FC<ChatScreenProps> = ({
 
       if (existing) {
         openConversation(existing);
-      } else {
-        // Iniciar conversa persistente no backend
+      } else if (activeChatTarget.targetUserId) {
         const start = async () => {
           const res = await api.startConversation(
             currentUserId,
-            activeChatTarget.targetUserId || 4,
+            activeChatTarget.targetUserId!,
             activeChatTarget.vagaId
           );
           if (res) {
             await loadData();
+            const updatedConvs = await api.getConversations(currentUserId);
+            const found = updatedConvs.find(
+              (c) => c.contactName.toLowerCase() === targetName || (c.dbId && c.dbId === res.id)
+            );
+            if (found) {
+              openConversation(found);
+            }
           }
         };
         start();
       }
       if (onClearTarget) onClearTarget();
     }
-  }, [activeChatTarget]);
+  }, [activeChatTarget, currentUserId]);
 
-  // Abrir conversa e carregar mensagens reais do PostgreSQL
+  // Polling em tempo real quando há uma conversa aberta
+  useEffect(() => {
+    if (!selectedConv || !currentUserId) return;
+
+    let isMounted = true;
+    const interval = setInterval(async () => {
+      try {
+        const msgs = await api.getMessages(selectedConv.id, currentUserId);
+        if (isMounted) {
+          setChatMessages((prev) => {
+            // Se mudou o número de mensagens ou a última é diferente, atualiza
+            if (msgs.length !== prev.length || (msgs.length > 0 && prev.length > 0 && msgs[msgs.length - 1].id !== prev[prev.length - 1].id)) {
+              return msgs;
+            }
+            return prev;
+          });
+        }
+      } catch (e) {}
+    }, 2500);
+
+    return () => {
+      isMounted = false;
+      clearInterval(interval);
+    };
+  }, [selectedConv?.id, currentUserId]);
+
+  // Auto-scroll ao enviar ou receber novas mensagens
+  useEffect(() => {
+    if (chatMessages.length > 0) {
+      setTimeout(() => {
+        flatListRef.current?.scrollToEnd({ animated: true });
+      }, 120);
+    }
+  }, [chatMessages.length]);
+
+  // Abrir conversa e marcar mensagens como lidas
   const openConversation = async (conv: Conversation) => {
     setSelectedConv(conv);
     try {
       const messages = await api.getMessages(conv.id, currentUserId);
       setChatMessages(messages);
+      // Zera o contador visual de não lidas
+      setConversations((prev) =>
+        prev.map((c) => (c.id === conv.id ? { ...c, unreadCount: 0 } : c))
+      );
     } catch (e) {
       console.warn('Erro ao carregar mensagens:', e);
     }
   };
 
-  // Enviar mensagem persistente
+  // Enviar mensagem persistente no PostgreSQL
   const handleSendMessage = async () => {
-    if (!inputText.trim() || !selectedConv || sending) return;
+    if (!inputText.trim() || !selectedConv || sending || !currentUserId) return;
 
     const textToSend = inputText.trim();
     setInputText('');
@@ -114,7 +163,6 @@ export const ChatScreen: React.FC<ChatScreenProps> = ({
       const newMsg = await api.sendMessage(selectedConv.id, currentUserId, textToSend);
       if (newMsg) {
         setChatMessages((prev) => [...prev, newMsg]);
-        // Atualiza a conversa na lista
         setConversations((prev) =>
           prev.map((c) =>
             c.id === selectedConv.id ? { ...c, lastMessage: textToSend, lastTime: 'Agora' } : c
@@ -128,6 +176,7 @@ export const ChatScreen: React.FC<ChatScreenProps> = ({
     }
   };
 
+  // Marcar notificação individual como lida
   const handleMarkNotificationRead = async (id: string) => {
     await api.markNotificationRead(id);
     setNotifications((prev) =>
@@ -135,9 +184,131 @@ export const ChatScreen: React.FC<ChatScreenProps> = ({
     );
   };
 
+  // Marcar todas notificações como lidas
+  const handleMarkAllNotificationsRead = async () => {
+    if (!currentUserId) return;
+    await api.markAllNotificationsAsRead(currentUserId);
+    setNotifications((prev) => prev.map((n) => ({ ...n, read: true })));
+  };
+
+  // Renderizar o chat (tanto no painel lateral quanto no modal)
+  const renderChatArea = () => {
+    if (!selectedConv) {
+      return (
+        <View style={styles.noConvSelectedBox}>
+          <Ionicons name="chatbubbles-outline" size={54} color={Colors.placeholder} />
+          <Text style={styles.noConvSelectedTitle}>Selecione uma conversa</Text>
+          <Text style={styles.noConvSelectedSub}>
+            Escolha um contato à esquerda para conversar ou responder sobre processos seletivos.
+          </Text>
+        </View>
+      );
+    }
+
+    return (
+      <KeyboardAvoidingView
+        style={styles.chatPane}
+        behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+      >
+        {/* Header do Chat */}
+        <View style={styles.chatPaneHeader}>
+          {!isWide && (
+            <TouchableOpacity onPress={() => setSelectedConv(null)} style={styles.backBtn}>
+              <Ionicons name="arrow-back" size={24} color={Colors.textPrimary} />
+            </TouchableOpacity>
+          )}
+          <Image source={{ uri: selectedConv.avatar }} style={styles.chatPaneAvatar} />
+          <View style={styles.chatPaneHeaderInfo}>
+            <Text style={styles.chatPaneName} numberOfLines={1}>
+              {selectedConv.contactName}
+            </Text>
+            <Text style={styles.chatPaneRole} numberOfLines={1}>
+              {selectedConv.role}
+            </Text>
+          </View>
+        </View>
+
+        {/* Lista de Mensagens */}
+        <FlatList
+          ref={flatListRef}
+          data={chatMessages}
+          keyExtractor={(item) => item.id}
+          contentContainerStyle={styles.chatMessagesContent}
+          initialNumToRender={15}
+          maxToRenderPerBatch={15}
+          windowSize={9}
+          removeClippedSubviews={Platform.OS !== 'web'}
+          onContentSizeChange={() => flatListRef.current?.scrollToEnd({ animated: true })}
+          renderItem={({ item }) => {
+            const isMe = item.sender === 'me';
+            return (
+              <View
+                style={[
+                  styles.messageBubble,
+                  isMe ? styles.messageBubbleMe : styles.messageBubbleOther,
+                ]}
+              >
+                <Text
+                  style={[
+                    styles.messageText,
+                    isMe ? styles.messageTextMe : styles.messageTextOther,
+                  ]}
+                >
+                  {item.text}
+                </Text>
+                <View style={styles.msgFooterRow}>
+                  <Text
+                    style={[
+                      styles.messageTime,
+                      isMe ? styles.messageTimeMe : styles.messageTimeOther,
+                    ]}
+                  >
+                    {item.time}
+                  </Text>
+                  {isMe && (
+                    <Ionicons
+                      name={item.lida ? 'checkmark-done' : 'checkmark'}
+                      size={13}
+                      color={item.lida ? '#60A5FA' : 'rgba(255,255,255,0.7)'}
+                      style={{ marginLeft: 3 }}
+                    />
+                  )}
+                </View>
+              </View>
+            );
+          }}
+        />
+
+        {/* Barra de Entrada de Texto */}
+        <View style={styles.inputContainer}>
+          <TextInput
+            style={styles.chatInput}
+            placeholder="Digite sua mensagem profissional..."
+            placeholderTextColor={Colors.placeholder}
+            value={inputText}
+            onChangeText={setInputText}
+            multiline
+          />
+          <TouchableOpacity
+            style={[styles.sendButton, !inputText.trim() && styles.sendButtonDisabled]}
+            onPress={handleSendMessage}
+            disabled={!inputText.trim() || sending}
+            activeOpacity={0.8}
+          >
+            {sending ? (
+              <ActivityIndicator size="small" color="#FFFFFF" />
+            ) : (
+              <Ionicons name="send" size={17} color="#FFFFFF" />
+            )}
+          </TouchableOpacity>
+        </View>
+      </KeyboardAvoidingView>
+    );
+  };
+
   return (
     <View style={styles.container}>
-      {/* Abas: Mensagens vs Notificações */}
+      {/* Abas Superiores: Mensagens vs Notificações */}
       <View style={styles.topTabBar}>
         <TouchableOpacity
           style={[styles.topTab, activeTab === 'messages' && styles.topTabActive]}
@@ -150,7 +321,7 @@ export const ChatScreen: React.FC<ChatScreenProps> = ({
             color={activeTab === 'messages' ? Colors.primary : Colors.textSecondary}
           />
           <Text style={[styles.topTabText, activeTab === 'messages' && styles.topTabTextActive]}>
-            MENSAGENS ({conversations.length})
+            CONVERSAS ({conversations.length})
           </Text>
         </TouchableOpacity>
 
@@ -170,204 +341,184 @@ export const ChatScreen: React.FC<ChatScreenProps> = ({
         </TouchableOpacity>
       </View>
 
-      {/* Conteúdo Aba Mensagens */}
-      {activeTab === 'messages' && (
-        <FlatList
-          data={conversations}
-          keyExtractor={(item) => item.id}
-          contentContainerStyle={styles.listContent}
-          showsVerticalScrollIndicator={false}
-          refreshControl={
-            <RefreshControl
-              refreshing={refreshing}
-              onRefresh={() => {
-                setRefreshing(true);
-                loadData();
-              }}
-              colors={[Colors.primary]}
-              tintColor={Colors.primary}
-            />
-          }
-          ListEmptyComponent={
-            <View style={styles.emptyContainer}>
-              <Ionicons name="chatbubbles-outline" size={54} color={Colors.textSecondary} />
-              <Text style={styles.emptyTitle}>Nenhuma conversa ativa</Text>
-              <Text style={styles.emptySub}>
-                Inicie uma conversa a partir de um Match no feed ou através de uma candidatura.
-              </Text>
-            </View>
-          }
-          renderItem={({ item }) => (
-            <TouchableOpacity
-              style={styles.convCard}
-              onPress={() => openConversation(item)}
-              activeOpacity={0.7}
-            >
-              <Image source={{ uri: item.avatar }} style={styles.avatarImg} />
-              <View style={styles.convInfo}>
-                <View style={styles.convHeaderRow}>
-                  <Text style={styles.convName} numberOfLines={1}>{item.contactName}</Text>
-                  <Text style={styles.convTime}>{item.lastTime}</Text>
-                </View>
-                <Text style={styles.convRole} numberOfLines={1}>{item.role}</Text>
-                <Text style={styles.convLastMessage} numberOfLines={1}>
-                  {item.lastMessage}
-                </Text>
-              </View>
-              {item.unreadCount > 0 && (
-                <View style={styles.unreadBadge}>
-                  <Text style={styles.unreadBadgeText}>{item.unreadCount}</Text>
-                </View>
-              )}
-            </TouchableOpacity>
-          )}
-        />
-      )}
-
-      {/* Conteúdo Aba Notificações */}
-      {activeTab === 'notifications' && (
-        <FlatList
-          data={notifications}
-          keyExtractor={(item) => item.id}
-          contentContainerStyle={styles.listContent}
-          showsVerticalScrollIndicator={false}
-          ListEmptyComponent={
-            <View style={styles.emptyContainer}>
-              <Ionicons name="notifications-off-outline" size={54} color={Colors.textSecondary} />
-              <Text style={styles.emptyTitle}>Nenhuma notificação</Text>
-              <Text style={styles.emptySub}>
-                Você receberá avisos quando suas candidaturas avançarem ou receber mensagens.
-              </Text>
-            </View>
-          }
-          renderItem={({ item }) => (
-            <TouchableOpacity
-              style={[styles.notifCard, !item.read && styles.notifCardUnread]}
-              onPress={() => handleMarkNotificationRead(item.id)}
-              activeOpacity={0.8}
-            >
-              <View style={[styles.notifIconCircle, !item.read && styles.notifIconCircleUnread]}>
-                <Ionicons
-                  name={
-                    item.type === 'status'
-                      ? 'trophy-outline'
-                      : item.type === 'candidatura'
-                      ? 'paper-plane-outline'
-                      : 'information-circle-outline'
-                  }
-                  size={20}
-                  color={!item.read ? Colors.primary : Colors.textSecondary}
+      {/* Conteúdo Principal */}
+      <View style={styles.bodyLayout}>
+        {/* Painel da Esquerda (Lista de Conversas ou Notificações) */}
+        <View style={[styles.leftPane, isWide && selectedConv ? styles.leftPaneNarrow : null]}>
+          {activeTab === 'messages' && (
+            <FlatList
+              data={conversations}
+              keyExtractor={(item) => item.id}
+              contentContainerStyle={styles.listContent}
+              showsVerticalScrollIndicator={false}
+              initialNumToRender={10}
+              maxToRenderPerBatch={10}
+              windowSize={7}
+              removeClippedSubviews={Platform.OS !== 'web'}
+              refreshControl={
+                <RefreshControl
+                  refreshing={refreshing}
+                  onRefresh={() => {
+                    setRefreshing(true);
+                    loadData();
+                  }}
+                  colors={[Colors.primary]}
+                  tintColor={Colors.primary}
                 />
-              </View>
-              <View style={styles.notifTextContainer}>
-                <Text style={styles.notifTitle}>{item.title}</Text>
-                <Text style={styles.notifDesc}>{item.description}</Text>
-                <Text style={styles.notifTime}>{item.time}</Text>
-              </View>
-              {!item.read && <View style={styles.unreadDot} />}
-            </TouchableOpacity>
-          )}
-        />
-      )}
-
-      {/* Modal de Conversa Ativa em Tempo Real */}
-      <Modal
-        visible={!!selectedConv}
-        animationType="slide"
-        onRequestClose={() => setSelectedConv(null)}
-      >
-        <KeyboardAvoidingView
-          behavior={Platform.OS === 'ios' ? 'padding' : undefined}
-          style={styles.chatModalContainer}
-        >
-          {/* Header da Conversa */}
-          <View style={styles.chatModalHeader}>
-            <TouchableOpacity
-              onPress={() => setSelectedConv(null)}
-              style={styles.backButton}
-              activeOpacity={0.7}
-            >
-              <Ionicons name="arrow-back" size={24} color={Colors.textPrimary} />
-            </TouchableOpacity>
-            <Image
-              source={{ uri: selectedConv?.avatar }}
-              style={styles.chatModalAvatar}
-            />
-            <View style={styles.chatModalHeaderInfo}>
-              <Text style={styles.chatModalName} numberOfLines={1}>
-                {selectedConv?.contactName}
-              </Text>
-              <Text style={styles.chatModalRole} numberOfLines={1}>
-                {selectedConv?.role}
-              </Text>
-            </View>
-          </View>
-
-          {/* Lista de Mensagens Persistidas */}
-          <FlatList
-            ref={flatListRef}
-            data={chatMessages}
-            keyExtractor={(item) => item.id}
-            contentContainerStyle={styles.chatMessagesContent}
-            onContentSizeChange={() => flatListRef.current?.scrollToEnd({ animated: true })}
-            renderItem={({ item }) => {
-              const isMe = item.sender === 'me';
-              return (
-                <View
-                  style={[
-                    styles.messageBubble,
-                    isMe ? styles.messageBubbleMe : styles.messageBubbleOther,
-                  ]}
-                >
-                  <Text
-                    style={[
-                      styles.messageText,
-                      isMe ? styles.messageTextMe : styles.messageTextOther,
-                    ]}
-                  >
-                    {item.text}
-                  </Text>
-                  <Text
-                    style={[
-                      styles.messageTime,
-                      isMe ? styles.messageTimeMe : styles.messageTimeOther,
-                    ]}
-                  >
-                    {item.time}
+              }
+              ListEmptyComponent={
+                <View style={styles.emptyContainer}>
+                  <Ionicons name="chatbubbles-outline" size={54} color={Colors.textSecondary} />
+                  <Text style={styles.emptyTitle}>Nenhuma conversa iniciada</Text>
+                  <Text style={styles.emptySub}>
+                    Inicie uma conversa a partir de um Match no feed ou através de uma candidatura recebida.
                   </Text>
                 </View>
-              );
-            }}
-          />
+              }
+              renderItem={({ item }) => {
+                const isSelected = selectedConv?.id === item.id;
 
-          {/* Barra de Entrada de Mensagem */}
-          <View style={styles.inputContainer}>
-            <TextInput
-              style={styles.chatInput}
-              placeholder="Digite sua mensagem profissional..."
-              placeholderTextColor={Colors.placeholder}
-              value={inputText}
-              onChangeText={setInputText}
-              multiline
+                return (
+                  <TouchableOpacity
+                    style={[styles.convCard, isSelected && styles.convCardActive]}
+                    onPress={() => openConversation(item)}
+                    activeOpacity={0.7}
+                  >
+                    <Image source={{ uri: item.avatar }} style={styles.avatarImg} />
+                    <View style={styles.convInfo}>
+                      <View style={styles.convHeaderRow}>
+                        <Text style={styles.convName} numberOfLines={1}>{item.contactName}</Text>
+                        <Text style={styles.convTime}>{item.lastTime}</Text>
+                      </View>
+                      <Text style={styles.convRole} numberOfLines={1}>{item.role}</Text>
+                      <Text style={styles.convLastMessage} numberOfLines={1}>
+                        {item.lastMessage}
+                      </Text>
+                    </View>
+                    {item.unreadCount > 0 && (
+                      <View style={styles.unreadBadge}>
+                        <Text style={styles.unreadBadgeText}>{item.unreadCount}</Text>
+                      </View>
+                    )}
+                  </TouchableOpacity>
+                );
+              }}
             />
-            <TouchableOpacity
-              style={[styles.sendButton, !inputText.trim() && styles.sendButtonDisabled]}
-              onPress={handleSendMessage}
-              disabled={!inputText.trim() || sending}
-              activeOpacity={0.8}
-            >
-              {sending ? (
-                <ActivityIndicator size="small" color="#FFFFFF" />
-              ) : (
-                <Ionicons name="send" size={18} color="#FFFFFF" />
+          )}
+
+          {activeTab === 'notifications' && (
+            <View style={{ flex: 1 }}>
+              {notifications.length > 0 && (
+                <View style={styles.notifActionsBar}>
+                  <TouchableOpacity
+                    onPress={handleMarkAllNotificationsRead}
+                    style={styles.markAllReadBtn}
+                  >
+                    <Ionicons name="checkmark-done-outline" size={16} color={Colors.primary} />
+                    <Text style={styles.markAllReadText}>Marcar todas como lidas</Text>
+                  </TouchableOpacity>
+                </View>
               )}
-            </TouchableOpacity>
-          </View>
-        </KeyboardAvoidingView>
-      </Modal>
+
+              <FlatList
+                data={notifications}
+                keyExtractor={(item) => item.id}
+                contentContainerStyle={styles.listContent}
+                showsVerticalScrollIndicator={false}
+                initialNumToRender={10}
+                maxToRenderPerBatch={10}
+                windowSize={7}
+                removeClippedSubviews={Platform.OS !== 'web'}
+                ListEmptyComponent={
+                  <View style={styles.emptyContainer}>
+                    <Ionicons name="notifications-off-outline" size={54} color={Colors.textSecondary} />
+                    <Text style={styles.emptyTitle}>Nenhuma notificação</Text>
+                    <Text style={styles.emptySub}>
+                      Você receberá avisos quando suas candidaturas avançarem, entrevistas forem agendadas ou houver novos matches.
+                    </Text>
+                  </View>
+                }
+                renderItem={({ item }) => (
+                  <TouchableOpacity
+                    style={[styles.notifCard, !item.read && styles.notifCardUnread]}
+                    onPress={() => handleMarkNotificationRead(item.id)}
+                    activeOpacity={0.8}
+                  >
+                    <View style={[styles.notifIconBox, { backgroundColor: getNotifColor(item.type).bg }]}>
+                      <Ionicons
+                        name={getNotifIcon(item.type) as any}
+                        size={20}
+                        color={getNotifColor(item.type).icon}
+                      />
+                    </View>
+                    <View style={styles.notifBody}>
+                      <View style={styles.notifTitleRow}>
+                        <Text style={[styles.notifTitle, !item.read && styles.notifTitleBold]} numberOfLines={1}>
+                          {item.title}
+                        </Text>
+                        <Text style={styles.notifTime}>{item.time}</Text>
+                      </View>
+                      <Text style={styles.notifDesc}>{item.description}</Text>
+                    </View>
+                    {!item.read && <View style={styles.notifDot} />}
+                  </TouchableOpacity>
+                )}
+              />
+            </View>
+          )}
+        </View>
+
+        {/* Painel da Direita (Visão Web: Chat Integrado) */}
+        {isWide && activeTab === 'messages' && (
+          <View style={styles.rightPane}>{renderChatArea()}</View>
+        )}
+      </View>
+
+      {/* Modal Mobile para Visualização da Conversa */}
+      {!isWide && (
+        <Modal
+          visible={!!selectedConv}
+          animationType="slide"
+          onRequestClose={() => setSelectedConv(null)}
+        >
+          {renderChatArea()}
+        </Modal>
+      )}
     </View>
   );
 };
+
+function getNotifIcon(type: string): string {
+  switch (type) {
+    case 'match':
+      return 'sparkles';
+    case 'entrevista':
+      return 'calendar';
+    case 'mensagem':
+      return 'chatbubble-ellipses';
+    case 'status':
+    case 'candidatura':
+      return 'document-text';
+    default:
+      return 'notifications';
+  }
+}
+
+function getNotifColor(type: string): { bg: string; icon: string } {
+  switch (type) {
+    case 'match':
+      return { bg: '#EDE9FE', icon: '#7C3AED' };
+    case 'entrevista':
+      return { bg: '#E0E7FF', icon: '#4F46E5' };
+    case 'mensagem':
+      return { bg: '#EFF6FF', icon: '#2563EB' };
+    case 'status':
+    case 'candidatura':
+      return { bg: '#ECFDF5', icon: '#059669' };
+    default:
+      return { bg: '#F1F5F9', icon: '#64748B' };
+  }
+}
 
 const styles = StyleSheet.create({
   container: {
@@ -402,6 +553,23 @@ const styles = StyleSheet.create({
   topTabTextActive: {
     color: Colors.primary,
   },
+  bodyLayout: {
+    flex: 1,
+    flexDirection: 'row',
+  },
+  leftPane: {
+    flex: 1,
+    backgroundColor: '#F8FAFC',
+  },
+  leftPaneNarrow: {
+    maxWidth: 380,
+    borderRightWidth: 1,
+    borderRightColor: '#E2E8F0',
+  },
+  rightPane: {
+    flex: 2,
+    backgroundColor: '#FFFFFF',
+  },
   listContent: {
     padding: 16,
     paddingBottom: 30,
@@ -409,7 +577,8 @@ const styles = StyleSheet.create({
   emptyContainer: {
     alignItems: 'center',
     justifyContent: 'center',
-    paddingVertical: 80,
+    paddingVertical: 70,
+    paddingHorizontal: 20,
   },
   emptyTitle: {
     fontSize: 16,
@@ -418,186 +587,243 @@ const styles = StyleSheet.create({
     marginTop: 12,
   },
   emptySub: {
-    fontSize: 12,
+    fontSize: 13,
     color: Colors.textSecondary,
     textAlign: 'center',
-    marginTop: 4,
-    maxWidth: 260,
-    lineHeight: 18,
+    marginTop: 6,
+    lineHeight: 19,
+    maxWidth: 340,
   },
   convCard: {
     flexDirection: 'row',
     alignItems: 'center',
     backgroundColor: '#FFFFFF',
-    borderRadius: 16,
-    padding: 14,
+    borderRadius: 14,
+    padding: 12,
     marginBottom: 10,
     borderWidth: 1,
     borderColor: '#E2E8F0',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.04,
+    shadowRadius: 2,
+    elevation: 1,
+  },
+  convCardActive: {
+    borderColor: Colors.primary,
+    backgroundColor: '#F8FAFC',
   },
   avatarImg: {
-    width: 48,
-    height: 48,
-    borderRadius: 24,
-    backgroundColor: '#F1F5F9',
-    marginRight: 12,
+    width: 46,
+    height: 46,
+    borderRadius: 23,
+    backgroundColor: '#E2E8F0',
   },
   convInfo: {
     flex: 1,
+    marginLeft: 12,
   },
   convHeaderRow: {
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
-    marginBottom: 2,
   },
   convName: {
-    fontSize: 15,
+    fontSize: 14,
     fontWeight: '800',
     color: Colors.textPrimary,
+    flex: 1,
   },
   convTime: {
     fontSize: 11,
-    color: Colors.textSecondary,
+    color: Colors.placeholder,
+    marginLeft: 6,
   },
   convRole: {
     fontSize: 12,
-    fontWeight: '600',
     color: Colors.primary,
-    marginBottom: 2,
+    fontWeight: '600',
+    marginTop: 1,
   },
   convLastMessage: {
     fontSize: 13,
-    color: '#64748B',
+    color: Colors.textSecondary,
+    marginTop: 3,
   },
   unreadBadge: {
     backgroundColor: Colors.primary,
-    width: 20,
-    height: 20,
-    borderRadius: 10,
+    borderRadius: 12,
+    minWidth: 22,
+    height: 22,
+    paddingHorizontal: 6,
     alignItems: 'center',
     justifyContent: 'center',
     marginLeft: 8,
   },
   unreadBadgeText: {
     color: '#FFFFFF',
-    fontSize: 10,
+    fontSize: 11,
     fontWeight: '800',
+  },
+  notifActionsBar: {
+    paddingHorizontal: 16,
+    paddingTop: 12,
+    alignItems: 'flex-end',
+  },
+  markAllReadBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    backgroundColor: '#EFF6FF',
+    paddingHorizontal: 10,
+    paddingVertical: 5,
+    borderRadius: 6,
+  },
+  markAllReadText: {
+    fontSize: 12,
+    fontWeight: '700',
+    color: Colors.primary,
   },
   notifCard: {
     flexDirection: 'row',
     alignItems: 'flex-start',
     backgroundColor: '#FFFFFF',
     borderRadius: 14,
-    padding: 14,
+    padding: 12,
     marginBottom: 10,
     borderWidth: 1,
     borderColor: '#E2E8F0',
   },
   notifCardUnread: {
-    borderColor: Colors.primary,
-    backgroundColor: '#FFF5F5',
+    backgroundColor: '#F8FAFC',
+    borderColor: '#BFDBFE',
   },
-  notifIconCircle: {
-    width: 36,
-    height: 36,
-    borderRadius: 18,
-    backgroundColor: '#F1F5F9',
+  notifIconBox: {
+    width: 38,
+    height: 38,
+    borderRadius: 19,
     alignItems: 'center',
     justifyContent: 'center',
     marginRight: 12,
   },
-  notifIconCircleUnread: {
-    backgroundColor: Colors.primaryLight,
-  },
-  notifTextContainer: {
+  notifBody: {
     flex: 1,
   },
+  notifTitleRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+  },
   notifTitle: {
-    fontSize: 14,
+    fontSize: 13,
+    color: Colors.textPrimary,
+    fontWeight: '600',
+    flex: 1,
+  },
+  notifTitleBold: {
     fontWeight: '800',
     color: Colors.textPrimary,
-    marginBottom: 2,
+  },
+  notifTime: {
+    fontSize: 11,
+    color: Colors.placeholder,
+    marginLeft: 6,
   },
   notifDesc: {
     fontSize: 12,
-    color: '#475569',
-    lineHeight: 16,
-    marginBottom: 4,
-  },
-  notifTime: {
-    fontSize: 10,
     color: Colors.textSecondary,
+    marginTop: 4,
+    lineHeight: 17,
   },
-  unreadDot: {
+  notifDot: {
     width: 8,
     height: 8,
     borderRadius: 4,
     backgroundColor: Colors.primary,
-    marginLeft: 6,
-    marginTop: 4,
+    marginTop: 6,
+    marginLeft: 8,
   },
-  chatModalContainer: {
+  noConvSelectedBox: {
     flex: 1,
-    backgroundColor: '#F8FAFC',
+    alignItems: 'center',
+    justifyContent: 'center',
+    padding: 30,
   },
-  chatModalHeader: {
+  noConvSelectedTitle: {
+    fontSize: 16,
+    fontWeight: '800',
+    color: Colors.textPrimary,
+    marginTop: 12,
+  },
+  noConvSelectedSub: {
+    fontSize: 13,
+    color: Colors.textSecondary,
+    textAlign: 'center',
+    marginTop: 4,
+    maxWidth: 320,
+    lineHeight: 19,
+  },
+  chatPane: {
+    flex: 1,
+    backgroundColor: '#FFFFFF',
+  },
+  chatPaneHeader: {
     flexDirection: 'row',
     alignItems: 'center',
     paddingHorizontal: 16,
     paddingVertical: 12,
-    backgroundColor: '#FFFFFF',
     borderBottomWidth: 1,
     borderBottomColor: '#E2E8F0',
+    backgroundColor: '#FFFFFF',
   },
-  backButton: {
-    padding: 4,
+  backBtn: {
     marginRight: 10,
+    padding: 4,
   },
-  chatModalAvatar: {
+  chatPaneAvatar: {
     width: 40,
     height: 40,
     borderRadius: 20,
-    marginRight: 12,
+    backgroundColor: '#E2E8F0',
   },
-  chatModalHeaderInfo: {
+  chatPaneHeaderInfo: {
     flex: 1,
+    marginLeft: 10,
   },
-  chatModalName: {
+  chatPaneName: {
     fontSize: 15,
     fontWeight: '800',
     color: Colors.textPrimary,
   },
-  chatModalRole: {
+  chatPaneRole: {
     fontSize: 12,
     color: Colors.primary,
     fontWeight: '600',
   },
   chatMessagesContent: {
     padding: 16,
-    gap: 8,
+    paddingBottom: 20,
   },
   messageBubble: {
-    maxWidth: '80%',
+    maxWidth: '78%',
+    borderRadius: 16,
     paddingHorizontal: 14,
     paddingVertical: 10,
-    borderRadius: 16,
+    marginBottom: 8,
   },
   messageBubbleMe: {
     alignSelf: 'flex-end',
     backgroundColor: Colors.primary,
-    borderBottomRightRadius: 2,
+    borderBottomRightRadius: 4,
   },
   messageBubbleOther: {
     alignSelf: 'flex-start',
-    backgroundColor: '#FFFFFF',
-    borderBottomLeftRadius: 2,
-    borderWidth: 1,
-    borderColor: '#E2E8F0',
+    backgroundColor: '#F1F5F9',
+    borderBottomLeftRadius: 4,
   },
   messageText: {
     fontSize: 14,
-    lineHeight: 19,
+    lineHeight: 20,
   },
   messageTextMe: {
     color: '#FFFFFF',
@@ -605,35 +831,42 @@ const styles = StyleSheet.create({
   messageTextOther: {
     color: Colors.textPrimary,
   },
+  msgFooterRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    alignSelf: 'flex-end',
+    marginTop: 3,
+  },
   messageTime: {
     fontSize: 10,
-    marginTop: 4,
-    textAlign: 'right',
   },
   messageTimeMe: {
-    color: 'rgba(255, 255, 255, 0.7)',
+    color: 'rgba(255,255,255,0.8)',
   },
   messageTimeOther: {
-    color: Colors.textSecondary,
+    color: Colors.placeholder,
   },
   inputContainer: {
     flexDirection: 'row',
-    alignItems: 'center',
+    alignItems: 'flex-end',
     padding: 10,
-    paddingHorizontal: 16,
-    backgroundColor: '#FFFFFF',
     borderTopWidth: 1,
     borderTopColor: '#E2E8F0',
-    gap: 10,
+    backgroundColor: '#FFFFFF',
+    gap: 8,
   },
   chatInput: {
     flex: 1,
-    backgroundColor: '#F1F5F9',
+    backgroundColor: '#F8FAFC',
     borderRadius: 20,
-    paddingHorizontal: 16,
-    paddingVertical: 10,
+    paddingHorizontal: 14,
+    paddingTop: 10,
+    paddingBottom: 10,
     fontSize: 14,
-    maxHeight: 90,
+    maxHeight: 100,
+    borderWidth: 1,
+    borderColor: '#E2E8F0',
+    color: Colors.textPrimary,
   },
   sendButton: {
     width: 42,
@@ -644,6 +877,6 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
   },
   sendButtonDisabled: {
-    opacity: 0.5,
+    backgroundColor: '#CBD5E1',
   },
 });

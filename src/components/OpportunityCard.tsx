@@ -5,6 +5,7 @@ import { Colors } from '../theme/colors';
 import { Opportunity } from '../types';
 
 const { width } = Dimensions.get('window');
+const FALLBACK_OPP_IMG = 'https://images.unsplash.com/photo-1486406146926-c627a92ad1ab?w=800&auto=format&fit=crop&q=80';
 
 interface OpportunityCardProps {
   opportunity: Opportunity;
@@ -19,11 +20,22 @@ export const OpportunityCard: React.FC<OpportunityCardProps> = ({
   onDislike,
   onPressDetails,
 }) => {
+  const [imageUri, setImageUri] = React.useState(opportunity.imagemUrl || FALLBACK_OPP_IMG);
+
+  React.useEffect(() => {
+    setImageUri(opportunity.imagemUrl || FALLBACK_OPP_IMG);
+  }, [opportunity.imagemUrl]);
+
   return (
     <View style={styles.cardContainer}>
       {/* Imagem / Foto Empresa */}
       <View style={styles.imageContainer}>
-        <Image source={{ uri: opportunity.imagemUrl }} style={styles.image} resizeMode="cover" />
+        <Image
+          source={{ uri: imageUri }}
+          style={styles.image}
+          resizeMode="cover"
+          onError={() => setImageUri(FALLBACK_OPP_IMG)}
+        />
         <View style={styles.gradientOverlay} />
 
         {/* Tag de Match / Compatibilidade */}

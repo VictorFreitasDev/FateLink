@@ -38,9 +38,9 @@ export const BottomNav: React.FC<BottomNavProps> = ({
     },
     {
       id: 'match' as TabType,
-      label: 'Match',
-      iconOutline: 'flame-outline',
-      iconFilled: 'flame',
+      label: 'Conexões',
+      iconOutline: 'git-network-outline',
+      iconFilled: 'git-network',
     },
     {
       id: 'publish' as TabType,
@@ -79,9 +79,9 @@ export const BottomNav: React.FC<BottomNavProps> = ({
     },
     {
       id: 'match' as TabType,
-      label: 'Match',
-      iconOutline: 'flame-outline',
-      iconFilled: 'flame',
+      label: 'Conexões',
+      iconOutline: 'git-network-outline',
+      iconFilled: 'git-network',
     },
     {
       id: 'applications' as TabType,
@@ -180,6 +180,9 @@ const styles = StyleSheet.create({
     justifyContent: 'space-around',
     height: 64,
     paddingHorizontal: 8,
+    maxWidth: 800,
+    width: '100%',
+    alignSelf: 'center',
   },
   tabItem: {
     flex: 1,

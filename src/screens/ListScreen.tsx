@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useMemo } from 'react';
 import {
   View,
   Text,
@@ -6,6 +6,7 @@ import {
   Image,
   StyleSheet,
   Dimensions,
+  useWindowDimensions,
   Animated,
   PanResponder,
   Platform,
@@ -13,24 +14,114 @@ import {
   Modal,
   FlatList,
   RefreshControl,
+  ScrollView,
 } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
 import { Ionicons } from '@expo/vector-icons';
+import * as Haptics from 'expo-haptics';
 import { Colors } from '../theme/colors';
-import { Opportunity, Candidate, UserRole } from '../types';
+import { Opportunity, Candidate, UserRole, FeedFilterCriteria, SortOption } from '../types';
 import { ModalDetails } from '../components/ModalDetails';
 import { api } from '../services/api';
+import { useFilterStore } from '../stores/filterStore';
 
 const { width: SCREEN_WIDTH, height: SCREEN_HEIGHT } = Dimensions.get('window');
-const SWIPE_THRESHOLD = SCREEN_WIDTH * 0.28;
+const CARD_WIDTH = Math.min(SCREEN_WIDTH * 0.92, 500);
+const SWIPE_THRESHOLD = Math.min(CARD_WIDTH * 0.25, 110);
+
+// Helper seguro para feedback tátil cross-platform
+const triggerHaptic = async (type: 'light' | 'medium' | 'heavy' | 'success' | 'warning' = 'light') => {
+  try {
+    if (Platform.OS === 'web') {
+      if (typeof navigator !== 'undefined' && typeof navigator.vibrate === 'function') {
+        if (type === 'success') {
+          navigator.vibrate([40, 60, 80]);
+        } else {
+          navigator.vibrate(25);
+        }
+      }
+      return;
+    }
+    if (type === 'light') {
+      await Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+    } else if (type === 'medium') {
+      await Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+    } else if (type === 'heavy') {
+      await Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Heavy);
+    } else if (type === 'success') {
+      await Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+    } else if (type === 'warning') {
+      await Haptics.notificationAsync(Haptics.NotificationFeedbackType.Warning);
+    }
+  } catch {
+    // Silencioso em ambientes sem suporte
+  }
+};
+
+// Componente de Avatar com Fallback Elegante de Iniciais
+const EntityAvatar: React.FC<{
+  uri?: string;
+  name: string;
+  size?: number;
+  borderColor?: string;
+  borderWidth?: number;
+}> = ({ uri, name, size = 42, borderColor = '#334155', borderWidth = 2 }) => {
+  const [hasError, setHasError] = useState(false);
+  const initials = (name || '?')
+    .split(' ')
+    .filter(Boolean)
+    .slice(0, 2)
+    .map((n) => n[0].toUpperCase())
+    .join('');
+
+  if (uri && !hasError) {
+    return (
+      <Image
+        source={{ uri }}
+        style={{
+          width: size,
+          height: size,
+          borderRadius: size / 2,
+          borderWidth,
+          borderColor,
+          backgroundColor: '#0F172A',
+        }}
+        onError={() => setHasError(true)}
+      />
+    );
+  }
+
+  return (
+    <View
+      style={{
+        width: size,
+        height: size,
+        borderRadius: size / 2,
+        borderWidth,
+        borderColor,
+        backgroundColor: '#1E293B',
+        alignItems: 'center',
+        justifyContent: 'center',
+      }}
+    >
+      <Text style={{ color: '#FFFFFF', fontSize: Math.floor(size * 0.38), fontWeight: '800' }}>
+        {initials}
+      </Text>
+    </View>
+  );
+};
 
 interface ListScreenProps {
   role: UserRole;
   currentUserId?: number;
+  currentUserName?: string;
+  currentUserAvatar?: string;
   opportunities: Opportunity[];
   candidates: Candidate[];
   searchQuery: string;
-  onStartChat: (name: string, roleInfo: string) => void;
+  appliedFilters?: FeedFilterCriteria | null;
+  onClearFilters?: () => void;
+  onStartChat: (name: string, roleInfo: string, targetUserId?: number, vagaId?: number) => void;
   onApplyToOpportunity?: (opp: Opportunity) => void;
   onRefresh?: () => Promise<void>;
   refreshing?: boolean;
@@ -38,10 +129,14 @@ interface ListScreenProps {
 
 export const ListScreen: React.FC<ListScreenProps> = ({
   role,
-  currentUserId = 1,
+  currentUserId,
+  currentUserName,
+  currentUserAvatar,
   opportunities,
   candidates,
   searchQuery,
+  appliedFilters,
+  onClearFilters,
   onStartChat,
   onApplyToOpportunity,
   onRefresh,
@@ -49,6 +144,33 @@ export const ListScreen: React.FC<ListScreenProps> = ({
 }) => {
   const isAluno = role === 'aluno';
   const targetTipo: 'vaga' | 'candidato' = isAluno ? 'vaga' : 'candidato';
+
+  // Dimensões dinâmicas da tela e responsividade cross-device
+  const { width: windowWidth, height: windowHeight } = useWindowDimensions();
+  const [cardsAreaHeight, setCardsAreaHeight] = useState<number>(0);
+
+  const isSmallScreen = windowWidth < 380;
+  const isCompactHeight = windowHeight < 760;
+  const dynamicCardWidth = Math.min(windowWidth * 0.93, 490);
+  const dynamicThreshold = Math.min(dynamicCardWidth * 0.25, 95);
+
+  const calculatedCardHeight = cardsAreaHeight > 0
+    ? Math.min(Math.max(cardsAreaHeight - 62, 300), 570)
+    : Math.min(Math.max(windowHeight - 330, 300), 570);
+
+  // Store de filtros persistentes e contagens
+  const {
+    studentFilters,
+    companyFilters,
+    resetStudentFilters,
+    resetCompanyFilters,
+    removeFilterKey,
+    setSortBy,
+    getActiveFiltersCount,
+  } = useFilterStore();
+
+  const currentFilters = isAluno ? studentFilters : companyFilters;
+  const currentSort = currentFilters.sortBy || 'relevancia';
 
   // Modo de Visualização: 'swipe' (Cards Imersivos Tinder/TikTok) ou 'list' (Diretório Completo)
   const [viewMode, setViewMode] = useState<'swipe' | 'list'>('swipe');
@@ -68,16 +190,17 @@ export const ListScreen: React.FC<ListScreenProps> = ({
   const pan = useRef(new Animated.ValueXY()).current;
   const isAnimating = useRef(false);
 
-  // Busca dados diretamente do backend se necessário para manter 100% atualizado
+  // Busca dados diretamente do backend com filtros aplicados
   const loadFeedData = async () => {
     setLoadingFeed(true);
     try {
+      const activeF = isAluno ? useFilterStore.getState().studentFilters : useFilterStore.getState().companyFilters;
       if (isAluno) {
-        const opps = await api.getOpportunities(currentUserId);
-        if (opps && opps.length > 0) setFeedItems(opps);
+        const opps = await api.getOpportunities(currentUserId, activeF);
+        if (Array.isArray(opps)) setFeedItems(opps);
       } else {
-        const cands = await api.getCandidates();
-        if (cands && cands.length > 0) setFeedItems(cands);
+        const cands = await api.getCandidates(activeF);
+        if (Array.isArray(cands)) setFeedItems(cands);
       }
     } catch (e) {
       console.warn('Erro ao carregar feed no ListScreen:', e);
@@ -88,6 +211,10 @@ export const ListScreen: React.FC<ListScreenProps> = ({
 
   // Carregar decisões anteriores do PostgreSQL para não repetir cartões
   const loadDecisions = async () => {
+    if (!currentUserId) {
+      setLoadingDecisions(false);
+      return;
+    }
     try {
       const decisions = await api.getFeedDecisions(currentUserId, targetTipo);
       const ids = new Set<number>(decisions.map((d) => d.target_id));
@@ -102,21 +229,201 @@ export const ListScreen: React.FC<ListScreenProps> = ({
   useEffect(() => {
     loadDecisions();
     loadFeedData();
-  }, [currentUserId, targetTipo, role]);
+  }, [currentUserId, targetTipo, role, studentFilters, companyFilters]);
 
   // Sincroniza se os props do pai mudarem
   useEffect(() => {
     const propList = isAluno ? opportunities : candidates;
-    if (propList && propList.length > 0) {
+    if (Array.isArray(propList)) {
       setFeedItems(propList);
     }
   }, [opportunities, candidates, isAluno]);
 
+  // Filtro de critérios adicionais combináveis
+  const matchesAppliedFilters = (item: any) => {
+    if (!item) return false;
+    const filters = currentFilters;
+
+    if (isAluno) {
+      const opp = item as Opportunity;
+      // 1. Curso
+      if (filters.curso && filters.curso !== 'Todos os Cursos') {
+        const cNorm = filters.curso.toLowerCase();
+        const related = (opp.cursoRelacionado || '').toLowerCase();
+        const area = (opp.area || '').toLowerCase();
+        const cargo = (opp.cargo || '').toLowerCase();
+        const isAds = cNorm.includes('análise') || cNorm.includes('ads');
+        const isDsm = cNorm.includes('multiplataforma') || cNorm.includes('dsm');
+        const isGti = cNorm.includes('gestão da ti') || cNorm.includes('gti');
+
+        const match =
+          related.includes(cNorm) ||
+          area.includes(cNorm) ||
+          cargo.includes(cNorm) ||
+          (isAds && (cargo.includes('software') || cargo.includes('dev') || cargo.includes('full') || cargo.includes('front') || cargo.includes('back') || area.includes('ti') || area.includes('software'))) ||
+          (isDsm && (cargo.includes('multiplataforma') || cargo.includes('mobile') || cargo.includes('react') || cargo.includes('web') || area.includes('mobile'))) ||
+          (isGti && (cargo.includes('gestão') || cargo.includes('suporte') || cargo.includes('redes') || area.includes('infra') || area.includes('ti')));
+        if (!match) return false;
+      }
+
+      // 2. Área Profissional
+      if (filters.area && filters.area !== 'Todas as Áreas') {
+        const aNorm = filters.area.toLowerCase();
+        const oppArea = (opp.area || '').toLowerCase();
+        const oppCargo = (opp.cargo || '').toLowerCase();
+        if (!oppArea.includes(aNorm) && !oppCargo.includes(aNorm) && !aNorm.includes(oppArea)) {
+          return false;
+        }
+      }
+
+      // 3. Modalidade
+      if (filters.modalidade && filters.modalidade !== 'Todas') {
+        if (opp.modalidade?.toLowerCase() !== filters.modalidade.toLowerCase()) {
+          return false;
+        }
+      }
+
+      // 4. Tipo de contratação
+      if (filters.tipo && filters.tipo !== 'Todos') {
+        if (opp.tipo?.toLowerCase() !== filters.tipo.toLowerCase()) {
+          return false;
+        }
+      }
+
+      // 5. Localização
+      if (filters.localizacao && filters.localizacao !== 'Todas') {
+        const locNorm = filters.localizacao.toLowerCase();
+        const oppLoc = (opp.localizacao || '').toLowerCase();
+        if (!oppLoc.includes(locNorm)) {
+          return false;
+        }
+      }
+
+      // 6. Faixa Salarial / Bolsa Mínima
+      if (filters.minBolsa && filters.minBolsa > 0) {
+        const clean = String(opp.bolsa || '').split(',')[0].replace(/[^\d]/g, '');
+        const val = parseInt(clean, 10);
+        if (isNaN(val) || val < filters.minBolsa) {
+          return false;
+        }
+      }
+
+      // 7. Compatibilidade Mínima (Match Score)
+      if (filters.minMatch && filters.minMatch > 0) {
+        if ((opp.matchScore || 0) < filters.minMatch) {
+          return false;
+        }
+      }
+
+      // 8. Competências
+      if (filters.competencias && filters.competencias.length > 0) {
+        const skillsNorm = filters.competencias.map((s) => s.toLowerCase());
+        const oppSkills = (opp.requisitos || []).map((r) => r.toLowerCase());
+        const oppDesc = (opp.descricao || '').toLowerCase();
+        const hasSkill = skillsNorm.some((skill) =>
+          oppSkills.some((r) => r.includes(skill) || skill.includes(r)) || oppDesc.includes(skill)
+        );
+        if (!hasSkill) return false;
+      }
+    } else {
+      const cand = item as Candidate;
+
+      // 1. Curso FATEC
+      if (filters.curso && filters.curso !== 'Todos os Cursos') {
+        const cNorm = filters.curso.toLowerCase();
+        const candCurso = (cand.curso || '').toLowerCase();
+        if (!candCurso.includes(cNorm) && !cNorm.includes(candCurso)) {
+          return false;
+        }
+      }
+
+      // 2. Unidade FATEC
+      if (filters.unidadeFatec && filters.unidadeFatec !== 'Todas as Unidades') {
+        const uNorm = filters.unidadeFatec.toLowerCase();
+        const candU = (cand.unidadeFatec || '').toLowerCase();
+        if (!candU.includes(uNorm) && !uNorm.includes(candU)) {
+          return false;
+        }
+      }
+
+      // 3. Semestre
+      if (filters.semestre && filters.semestre !== 'Todos os Semestres') {
+        const numFilter = (filters.semestre.match(/\d+/) || [])[0];
+        const numCand = (cand.semestre?.match(/\d+/) || [])[0];
+        if (numFilter && numCand && numFilter !== numCand) {
+          return false;
+        }
+      }
+
+      // 4. Disponibilidade de Horário
+      if (filters.disponibilidade && filters.disponibilidade !== 'Todas') {
+        const dNorm = filters.disponibilidade.toLowerCase();
+        const candD = (cand.disponibilidade || '').toLowerCase();
+        if (!candD.includes(dNorm)) {
+          return false;
+        }
+      }
+
+      // 5. Compatibilidade Mínima
+      if (filters.minMatch && filters.minMatch > 0) {
+        if ((cand.matchScore || 0) < filters.minMatch) {
+          return false;
+        }
+      }
+
+      // 6. Competências Técnicas
+      if (filters.competencias && filters.competencias.length > 0) {
+        const skillsNorm = filters.competencias.map((s) => s.toLowerCase());
+        const candSkills = (cand.competencias || []).map((c) => c.toLowerCase());
+        const sobre = (cand.sobre || '').toLowerCase();
+        const hasSkill = skillsNorm.some((skill) =>
+          candSkills.some((c) => c.includes(skill) || skill.includes(c)) || sobre.includes(skill)
+        );
+        if (!hasSkill) return false;
+      }
+    }
+    return true;
+  };
+
+  // Ordenação inteligente com base no critério selecionado
+  const sortFeedItems = (items: any[]) => {
+    const list = [...items];
+    const sortBy = currentSort;
+
+    if (sortBy === 'recente') {
+      list.sort((a, b) => {
+        const timeA = new Date(a.criadoEm || 0).getTime() || a.dbId || 0;
+        const timeB = new Date(b.criadoEm || 0).getTime() || b.dbId || 0;
+        return timeB - timeA;
+      });
+    } else if (sortBy === 'maior_bolsa' && isAluno) {
+      const getBolsa = (item: any) => {
+        const clean = String(item.bolsa || '').split(',')[0].replace(/[^\d]/g, '');
+        const val = parseInt(clean, 10);
+        return isNaN(val) ? 0 : val;
+      };
+      list.sort((a, b) => getBolsa(b) - getBolsa(a));
+    } else if (sortBy === 'semestre' && !isAluno) {
+      const getSem = (item: any) => {
+        const m = String(item.semestre || '').match(/\d+/);
+        return m ? parseInt(m[0], 10) : 0;
+      };
+      list.sort((a, b) => getSem(b) - getSem(a));
+    } else {
+      // Relevância (default): ordenar por matchScore decrescente
+      list.sort((a, b) => (b.matchScore || 0) - (a.matchScore || 0));
+    }
+
+    return list;
+  };
+
   // Lista de itens filtrada por busca e excluindo itens já avaliados (para Modo Swipe)
-  const activeItems = feedItems.filter((item: any) => {
+  const filteredActiveItems = feedItems.filter((item: any) => {
     if (!item) return false;
     const numericId = item.dbId || parseInt(String(item.id).replace('opp-', '').replace('cand-', ''), 10);
     if (evaluatedIds.has(numericId)) return false;
+
+    if (!matchesAppliedFilters(item)) return false;
 
     if (!searchQuery.trim()) return true;
     const q = searchQuery.toLowerCase();
@@ -141,8 +448,9 @@ export const ListScreen: React.FC<ListScreenProps> = ({
   });
 
   // Lista completa de todos os itens (para Modo Lista Completa)
-  const allListItems = feedItems.filter((item: any) => {
+  const filteredAllListItems = feedItems.filter((item: any) => {
     if (!item) return false;
+    if (!matchesAppliedFilters(item)) return false;
     if (!searchQuery.trim()) return true;
     const q = searchQuery.toLowerCase();
     if (isAluno) {
@@ -165,6 +473,85 @@ export const ListScreen: React.FC<ListScreenProps> = ({
     }
   });
 
+  const activeItems = useMemo(() => sortFeedItems(filteredActiveItems), [filteredActiveItems, currentSort]);
+  const allListItems = useMemo(() => sortFeedItems(filteredAllListItems), [filteredAllListItems, currentSort]);
+
+  // Lista de chips ativos para exibição e remoção rápida individual
+  const activeChips = useMemo(() => {
+    const chips: { key: keyof FeedFilterCriteria; label: string; subKey?: string }[] = [];
+    const f = currentFilters;
+
+    if (f.curso && f.curso !== 'Todos os Cursos') {
+      chips.push({ key: 'curso', label: `Curso: ${f.curso.length > 18 ? f.curso.slice(0, 16) + '...' : f.curso}` });
+    }
+    if (f.area && f.area !== 'Todas as Áreas') {
+      chips.push({ key: 'area', label: `Área: ${f.area}` });
+    }
+    if (f.modalidade && f.modalidade !== 'Todas') {
+      chips.push({ key: 'modalidade', label: `Mod: ${f.modalidade}` });
+    }
+    if (f.tipo && f.tipo !== 'Todos') {
+      chips.push({ key: 'tipo', label: `Tipo: ${f.tipo}` });
+    }
+    if (f.localizacao && f.localizacao !== 'Todas') {
+      chips.push({ key: 'localizacao', label: `Local: ${f.localizacao}` });
+    }
+    if (f.minBolsa && f.minBolsa > 0) {
+      chips.push({ key: 'minBolsa', label: `Bolsa ≥ R$ ${f.minBolsa}` });
+    }
+    if (f.minMatch && f.minMatch > 0) {
+      chips.push({ key: 'minMatch', label: `Match ≥ ${f.minMatch}%` });
+    }
+    if (f.unidadeFatec && f.unidadeFatec !== 'Todas as Unidades') {
+      chips.push({ key: 'unidadeFatec', label: `Unidade: ${f.unidadeFatec}` });
+    }
+    if (f.semestre && f.semestre !== 'Todos os Semestres') {
+      chips.push({ key: 'semestre', label: `Sem: ${f.semestre}` });
+    }
+    if (f.disponibilidade && f.disponibilidade !== 'Todas') {
+      chips.push({ key: 'disponibilidade', label: `Disp: ${f.disponibilidade}` });
+    }
+    if (f.competencias && f.competencias.length > 0) {
+      f.competencias.forEach((skill) => {
+        chips.push({ key: 'competencias', label: skill, subKey: skill });
+      });
+    }
+
+    return chips;
+  }, [currentFilters]);
+
+  // Remoção de um chip específico
+  const handleRemoveChip = (key: keyof FeedFilterCriteria, subKey?: string) => {
+    removeFilterKey(role, key, subKey);
+  };
+
+  // Limpeza de todos os filtros
+  const handleClearAll = () => {
+    if (isAluno) {
+      resetStudentFilters();
+    } else {
+      resetCompanyFilters();
+    }
+    if (onClearFilters) onClearFilters();
+  };
+
+  // Seleção de ordenação rápida
+  const handleSelectSort = (sortId: SortOption) => {
+    setSortBy(role, sortId);
+  };
+
+  const sortOptions: { id: SortOption; label: string; icon: string }[] = isAluno
+    ? [
+        { id: 'relevancia', label: 'Mais Compatíveis', icon: 'sparkles' },
+        { id: 'recente', label: 'Mais Recentes', icon: 'time-outline' },
+        { id: 'maior_bolsa', label: 'Maior Bolsa', icon: 'cash-outline' },
+      ]
+    : [
+        { id: 'relevancia', label: 'Mais Compatíveis', icon: 'sparkles' },
+        { id: 'recente', label: 'Mais Recentes', icon: 'time-outline' },
+        { id: 'semestre', label: 'Semestre Avançado', icon: 'school-outline' },
+      ];
+
   const defaultOppImage = 'https://images.unsplash.com/photo-1486406146926-c627a92ad1ab?auto=format&fit=crop&w=800&q=80';
   const defaultCandImage = 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?auto=format&fit=crop&w=800&q=80';
 
@@ -174,9 +561,9 @@ export const ListScreen: React.FC<ListScreenProps> = ({
   const currentImageUrl = currentItem?.imagemUrl || (isAluno ? defaultOppImage : defaultCandImage);
   const nextImageUrl = nextItem?.imagemUrl || (isAluno ? defaultOppImage : defaultCandImage);
 
-  // Interpolações de Física e Rotação
+  // Interpolações de Física e Rotação responsivas ao viewport
   const rotate = pan.x.interpolate({
-    inputRange: [-SCREEN_WIDTH * 1.5, 0, SCREEN_WIDTH * 1.5],
+    inputRange: [-windowWidth * 1.5, 0, windowWidth * 1.5],
     outputRange: ['-16deg', '0deg', '16deg'],
     extrapolate: 'clamp',
   });
@@ -191,45 +578,55 @@ export const ListScreen: React.FC<ListScreenProps> = ({
     ],
   };
 
-  // Carimbo "TENHO INTERESSE" (Direita - Verde)
+  // Feedback de Conexão (Direita - Esmeralda)
   const likeOpacity = pan.x.interpolate({
-    inputRange: [15, SWIPE_THRESHOLD * 0.8],
+    inputRange: [15, dynamicThreshold * 0.8],
     outputRange: [0, 1],
     extrapolate: 'clamp',
   });
 
-  // Carimbo "PASSAR" (Esquerda - Vermelho)
+  // Feedback de Avanço (Esquerda - Ardósia)
   const passOpacity = pan.x.interpolate({
-    inputRange: [-SWIPE_THRESHOLD * 0.8, -15],
+    inputRange: [-dynamicThreshold * 0.8, -15],
     outputRange: [1, 0],
     extrapolate: 'clamp',
   });
 
   // Próximo cartão ao fundo (Stack Effect ReactBits)
   const nextCardScale = pan.x.interpolate({
-    inputRange: [-SCREEN_WIDTH, 0, SCREEN_WIDTH],
+    inputRange: [-windowWidth, 0, windowWidth],
     outputRange: [1, 0.94, 1],
     extrapolate: 'clamp',
   });
 
-  // Gestor de Arraste (PanResponder)
+  // Gestor de Arraste (PanResponder otimizado para Web, iOS e Android)
   const panResponder = useRef(
     PanResponder.create({
-      onStartShouldSetPanResponder: () => false,
+      onStartShouldSetPanResponder: () => true,
+      onStartShouldSetPanResponderCapture: () => false,
       onMoveShouldSetPanResponder: (_, gesture) => {
         if (modalVisible || isAnimating.current) return false;
-        return Math.abs(gesture.dx) > 12 && Math.abs(gesture.dx) > Math.abs(gesture.dy);
+        return Math.abs(gesture.dx) > 6;
+      },
+      onMoveShouldSetPanResponderCapture: (_, gesture) => {
+        if (modalVisible || isAnimating.current) return false;
+        return Math.abs(gesture.dx) > 6;
+      },
+      onPanResponderTerminationRequest: () => false,
+      onPanResponderGrant: () => {
+        pan.setOffset({ x: 0, y: 0 });
+        pan.setValue({ x: 0, y: 0 });
       },
       onPanResponderMove: (_, gesture) => {
         if (isAnimating.current || modalVisible) return;
-        pan.setValue({ x: gesture.dx, y: gesture.dy * 0.3 });
+        pan.setValue({ x: gesture.dx, y: gesture.dy * 0.25 });
       },
       onPanResponderRelease: (_, gesture) => {
         if (isAnimating.current || modalVisible) return;
 
-        if (gesture.dx > SWIPE_THRESHOLD || gesture.vx > 0.65) {
+        if (gesture.dx > dynamicThreshold || gesture.vx > 0.45) {
           executeDecision('like');
-        } else if (gesture.dx < -SWIPE_THRESHOLD || gesture.vx < -0.65) {
+        } else if (gesture.dx < -dynamicThreshold || gesture.vx < -0.45) {
           executeDecision('pass');
         } else {
           // Gesto insuficiente: Spring physics suave de retorno
@@ -240,6 +637,15 @@ export const ListScreen: React.FC<ListScreenProps> = ({
             useNativeDriver: false,
           }).start();
         }
+      },
+      onPanResponderTerminate: () => {
+        Animated.spring(pan, {
+          toValue: { x: 0, y: 0 },
+          friction: 5,
+          tension: 40,
+          useNativeDriver: false,
+        }).start();
+        isAnimating.current = false;
       },
     })
   ).current;
@@ -266,39 +672,74 @@ export const ListScreen: React.FC<ListScreenProps> = ({
     };
   }, [currentItem, modalVisible]);
 
-  // Executar Decisão com Animação Fluida e Persistência no PostgreSQL
+  // Executar Decisão com Animação Fluida, Feedback Tátil e Persistência no PostgreSQL
   const executeDecision = (decisao: 'like' | 'pass') => {
     if (isAnimating.current || !currentItem) return;
     isAnimating.current = true;
+    triggerHaptic(decisao === 'like' ? 'medium' : 'light');
 
-    const targetX = decisao === 'like' ? SCREEN_WIDTH * 1.4 : -SCREEN_WIDTH * 1.4;
+    const targetX = decisao === 'like' ? windowWidth * 1.4 : -windowWidth * 1.4;
     const targetY = 30;
 
     const targetNumericId = currentItem.dbId || parseInt(String(currentItem.id).replace('opp-', '').replace('cand-', ''), 10);
+
+    const safetyTimer = setTimeout(() => {
+      isAnimating.current = false;
+    }, 450);
 
     Animated.timing(pan, {
       toValue: { x: targetX, y: targetY },
       duration: 260,
       useNativeDriver: false,
     }).start(async () => {
+      clearTimeout(safetyTimer);
       pan.setValue({ x: 0, y: 0 });
       isAnimating.current = false;
 
       // Gravar no PostgreSQL
-      try {
-        const res = await api.sendFeedDecision(
-          currentUserId,
-          role,
-          targetNumericId,
-          targetTipo,
-          decisao
-        );
+      if (currentUserId) {
+        try {
+          const res = await api.sendFeedDecision(
+            currentUserId,
+            role,
+            targetNumericId,
+            targetTipo,
+            decisao
+          );
 
-        if (res.isMutualMatch) {
-          setMutualMatchInfo(res.matchInfo || { empresaNome: 'Empresa', cargo: 'Vaga' });
+          if (res.isMutualMatch) {
+            triggerHaptic('success');
+            const oppItem = isAluno ? currentItem : null;
+            const candItem = !isAluno ? currentItem : null;
+
+            const studentName =
+              res.matchInfo?.alunoNome ||
+              (isAluno ? (currentUserName || 'Você') : (candItem?.nome || 'Estudante FATEC'));
+            const studentAvatar = isAluno ? currentUserAvatar : candItem?.imagemUrl;
+            const companyName =
+              res.matchInfo?.empresaNome ||
+              (isAluno
+                ? (oppItem?.nomeFantasia || oppItem?.empresa || 'Empresa')
+                : (currentUserName || 'Sua Empresa'));
+            const companyAvatar = isAluno ? oppItem?.imagemUrl : currentUserAvatar;
+            const cargoTitle =
+              res.matchInfo?.cargo || (isAluno ? oppItem?.cargo : (candItem?.curso || 'Oportunidade'));
+
+            setMutualMatchInfo({
+              alunoNome: studentName,
+              alunoImagem: studentAvatar,
+              empresaNome: companyName,
+              empresaImagem: companyAvatar,
+              cargo: cargoTitle,
+              empresaId: isAluno ? oppItem?.empresaId : currentUserId,
+              alunoId: isAluno ? currentUserId : candItem?.usuarioId,
+              vagaId: oppItem ? (oppItem.dbId || parseInt(String(oppItem.id).replace('opp-', ''), 10)) : undefined,
+              matchScore: currentItem?.matchScore || 95,
+            });
+          }
+        } catch (err) {
+          console.warn('Erro ao salvar decisão no banco:', err);
         }
-      } catch (err) {
-        console.warn('Erro ao salvar decisão no banco:', err);
       }
 
       setLastAction({ id: targetNumericId, decisao });
@@ -308,7 +749,8 @@ export const ListScreen: React.FC<ListScreenProps> = ({
 
   // Desfazer última decisão (Undo)
   const handleUndo = async () => {
-    if (!lastAction || isAnimating.current) return;
+    if (!lastAction || isAnimating.current || !currentUserId) return;
+    triggerHaptic('light');
     try {
       const ok = await api.undoFeedDecision(currentUserId, targetTipo);
       if (ok) {
@@ -326,6 +768,8 @@ export const ListScreen: React.FC<ListScreenProps> = ({
 
   // Resetar Feed para rever recomendações
   const handleResetFeed = async () => {
+    if (!currentUserId) return;
+    triggerHaptic('medium');
     try {
       await api.resetFeed(currentUserId, targetTipo);
       setEvaluatedIds(new Set());
@@ -436,10 +880,15 @@ export const ListScreen: React.FC<ListScreenProps> = ({
             style={styles.listPrimaryBtn}
             onPress={() => {
               if (isVaga) {
-                if (onApplyToOpportunity) onApplyToOpportunity(item as Opportunity);
-                else onStartChat(item.nomeFantasia || item.empresa, item.cargo);
+                const opp = item as Opportunity;
+                if (onApplyToOpportunity) onApplyToOpportunity(opp);
+                else {
+                  const vagaDbId = opp.dbId || parseInt(String(opp.id || '').replace('opp-', ''), 10);
+                  onStartChat(opp.nomeFantasia || opp.empresa, opp.cargo, opp.empresaId, isNaN(vagaDbId) ? undefined : vagaDbId);
+                }
               } else {
-                onStartChat(item.nome, item.curso);
+                const cand = item as Candidate;
+                onStartChat(cand.nome, cand.curso, cand.usuarioId, undefined);
               }
             }}
             activeOpacity={0.8}
@@ -489,6 +938,78 @@ export const ListScreen: React.FC<ListScreenProps> = ({
         </TouchableOpacity>
       </View>
 
+      {/* Barra de Ordenação Rápida Integrada */}
+      <View style={styles.sortBar}>
+        <Ionicons name="swap-vertical" size={14} color="#94A3B8" style={{ marginRight: 6 }} />
+        <Text style={styles.sortBarLabel}>Ordenar:</Text>
+        <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.sortScrollContent}>
+          {sortOptions.map((opt) => {
+            const isSelected = currentSort === opt.id;
+            return (
+              <TouchableOpacity
+                key={opt.id}
+                style={[styles.sortPill, isSelected && styles.sortPillActive]}
+                onPress={() => handleSelectSort(opt.id)}
+                activeOpacity={0.7}
+              >
+                <Ionicons
+                  name={opt.icon as any}
+                  size={12}
+                  color={isSelected ? '#FFFFFF' : '#94A3B8'}
+                  style={{ marginRight: 4 }}
+                />
+                <Text style={[styles.sortPillText, isSelected && styles.sortPillTextActive]}>
+                  {opt.label}
+                </Text>
+              </TouchableOpacity>
+            );
+          })}
+        </ScrollView>
+      </View>
+
+      {/* Indicadores de Filtros Ativos com Contagem e Chips Removíveis */}
+      {activeChips.length > 0 && (
+        <View style={styles.activeFiltersSection}>
+          <View style={styles.activeFiltersHeaderRow}>
+            <View style={styles.activeCountBadgeRow}>
+              <Ionicons name="filter" size={13} color={Colors.primary} />
+              <Text style={styles.activeFiltersHeaderCount}>
+                {activeChips.length} {activeChips.length === 1 ? 'filtro ativo' : 'filtros ativos'}
+              </Text>
+              <Text style={styles.activeResultCountDot}>•</Text>
+              <Text style={styles.activeResultCountText}>
+                {allListItems.length} {isAluno ? (allListItems.length === 1 ? 'vaga' : 'vagas') : (allListItems.length === 1 ? 'candidato' : 'candidatos')}
+              </Text>
+            </View>
+            <TouchableOpacity onPress={handleClearAll} style={styles.clearAllBtn} activeOpacity={0.7}>
+              <Ionicons name="trash-outline" size={12} color="#EF4444" style={{ marginRight: 4 }} />
+              <Text style={styles.clearAllBtnText}>Limpar Filtros</Text>
+            </TouchableOpacity>
+          </View>
+
+          <ScrollView
+            horizontal
+            showsHorizontalScrollIndicator={false}
+            contentContainerStyle={styles.activeChipsScrollContent}
+          >
+            {activeChips.map((chip, index) => (
+              <View key={`${chip.key}-${chip.subKey || index}`} style={styles.activeFilterChip}>
+                <Text style={styles.activeFilterChipText} numberOfLines={1}>
+                  {chip.label}
+                </Text>
+                <TouchableOpacity
+                  onPress={() => handleRemoveChip(chip.key, chip.subKey)}
+                  hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+                  style={styles.activeFilterChipClose}
+                >
+                  <Ionicons name="close-circle" size={15} color="#FFFFFF" />
+                </TouchableOpacity>
+              </View>
+            ))}
+          </ScrollView>
+        </View>
+      )}
+
       {/* CONTEÚDO DINÂMICO CONFORME O MODO SELECIONADO */}
       {viewMode === 'list' ? (
         <FlatList
@@ -497,6 +1018,10 @@ export const ListScreen: React.FC<ListScreenProps> = ({
           renderItem={renderListItem}
           contentContainerStyle={styles.listContentContainer}
           showsVerticalScrollIndicator={false}
+          initialNumToRender={8}
+          maxToRenderPerBatch={10}
+          windowSize={7}
+          removeClippedSubviews={Platform.OS !== 'web'}
           refreshControl={
             <RefreshControl
               refreshing={refreshing || loadingFeed}
@@ -510,15 +1035,35 @@ export const ListScreen: React.FC<ListScreenProps> = ({
           }
           ListEmptyComponent={
             <View style={styles.listEmptyBox}>
-              <Ionicons name="search-outline" size={42} color="#64748B" />
-              <Text style={styles.listEmptyTitle}>Nenhum resultado encontrado</Text>
+              <View style={styles.emptyFilterCircle}>
+                <Ionicons
+                  name={activeChips.length > 0 ? 'filter-outline' : 'search-outline'}
+                  size={36}
+                  color={activeChips.length > 0 ? Colors.primary : '#64748B'}
+                />
+              </View>
+              <Text style={styles.listEmptyTitle}>
+                {activeChips.length > 0
+                  ? 'Nenhum resultado com estes filtros'
+                  : 'Nenhum resultado encontrado'}
+              </Text>
               <Text style={styles.listEmptySub}>
-                {searchQuery
+                {activeChips.length > 0
+                  ? `Nenhum${isAluno ? 'a vaga' : ' candidato'} atende a todos os ${activeChips.length} critérios selecionados.`
+                  : searchQuery
                   ? `Nenhuma correspondência para "${searchQuery}". Tente outros termos.`
                   : isAluno
                   ? 'Nenhuma vaga cadastrada no momento.'
                   : 'Nenhum currículo cadastrado no momento.'}
               </Text>
+              {activeChips.length > 0 && (
+                <TouchableOpacity style={styles.clearFiltersBtn} onPress={handleClearAll} activeOpacity={0.8}>
+                  <Ionicons name="refresh-outline" size={16} color="#FFFFFF" />
+                  <Text style={styles.clearFiltersBtnText}>
+                    Limpar Filtros e Ver Todas ({feedItems.length})
+                  </Text>
+                </TouchableOpacity>
+              )}
             </View>
           }
         />
@@ -532,23 +1077,42 @@ export const ListScreen: React.FC<ListScreenProps> = ({
         ) : activeItems.length === 0 ? (
           <View style={styles.emptyContainer}>
             <View style={styles.emptyIconCircle}>
-              <Ionicons name={isAluno ? 'briefcase-outline' : 'people-outline'} size={44} color={Colors.primary} />
+              <Ionicons
+                name={activeChips.length > 0 ? 'filter-outline' : isAluno ? 'briefcase-outline' : 'people-outline'}
+                size={42}
+                color={Colors.primary}
+              />
             </View>
             <Text style={styles.emptyTitle}>
-              {isAluno ? 'Você avaliou todas as vagas no swipe!' : 'Você avaliou todos os talentos no swipe!'}
+              {activeChips.length > 0
+                ? 'Nenhum card com os filtros atuais'
+                : isAluno
+                ? 'Você avaliou todas as vagas no swipe!'
+                : 'Você avaliou todos os talentos no swipe!'}
             </Text>
             <Text style={styles.emptySubtitle}>
-              {isAluno
+              {activeChips.length > 0
+                ? `Não há cards correspondentes aos ${activeChips.length} filtros ativos (ou todos já foram avaliados).`
+                : isAluno
                 ? 'Você já deu like ou passou nas recomendações do feed. Deseja rever tudo ou explorar no formato de lista?'
                 : 'Você já visualizou todos os alunos disponíveis no modo de cards. Deseja rever o feed ou ver a lista completa?'}
             </Text>
             <View style={styles.emptyButtonsCol}>
-              <TouchableOpacity style={styles.resetButton} onPress={handleResetFeed} activeOpacity={0.85}>
-                <Ionicons name="refresh" size={18} color="#FFFFFF" />
-                <Text style={styles.resetButtonText}>
-                  {isAluno ? 'Rever Todas as Vagas no Feed' : 'Rever Todos os Alunos no Feed'}
-                </Text>
-              </TouchableOpacity>
+              {activeChips.length > 0 ? (
+                <TouchableOpacity style={styles.resetButton} onPress={handleClearAll} activeOpacity={0.85}>
+                  <Ionicons name="refresh" size={18} color="#FFFFFF" />
+                  <Text style={styles.resetButtonText}>
+                    Limpar Filtros e Ver Todos ({feedItems.length})
+                  </Text>
+                </TouchableOpacity>
+              ) : (
+                <TouchableOpacity style={styles.resetButton} onPress={handleResetFeed} activeOpacity={0.85}>
+                  <Ionicons name="refresh" size={18} color="#FFFFFF" />
+                  <Text style={styles.resetButtonText}>
+                    {isAluno ? 'Rever Todas as Vagas no Feed' : 'Rever Todos os Alunos no Feed'}
+                  </Text>
+                </TouchableOpacity>
+              )}
 
               <TouchableOpacity
                 style={styles.switchToListBtn}
@@ -563,8 +1127,16 @@ export const ListScreen: React.FC<ListScreenProps> = ({
             </View>
           </View>
         ) : (
-          <View style={styles.cardsArea}>
-          {/* PRÓXIMO CARTÃO AO FUNDO (STACK EFFECT REACTBITS) */}
+          <View
+            style={styles.cardsArea}
+            onLayout={(e) => {
+              const h = e.nativeEvent.layout.height;
+              if (h > 0 && Math.abs(h - cardsAreaHeight) > 2) {
+                setCardsAreaHeight(h);
+              }
+            }}
+          >
+          {/* PRÓXIMO CARTÃO AO FUNDO (STACK EFFECT EDITORIAL TECH) */}
           {nextItem && (
             <Animated.View
               pointerEvents="none"
@@ -572,179 +1144,296 @@ export const ListScreen: React.FC<ListScreenProps> = ({
                 styles.cardContainer,
                 styles.nextCard,
                 {
+                  height: calculatedCardHeight,
+                  width: dynamicCardWidth,
                   transform: [{ scale: nextCardScale }],
                 },
               ]}
             >
-              <View style={styles.imageWrapper}>
+              <View
+                style={[
+                  styles.showcaseBannerContainer,
+                  { height: calculatedCardHeight < 420 ? 105 : 135 },
+                ]}
+                pointerEvents="none"
+              >
                 <Image
                   source={{ uri: nextImageUrl }}
-                  style={styles.cardImage}
+                  style={styles.showcaseImage}
                   resizeMode="cover"
                 />
+                <LinearGradient
+                  colors={['rgba(11,17,30,0.3)', 'rgba(19,29,49,0.85)', '#131D31']}
+                  style={styles.showcaseGradient}
+                />
               </View>
-              <LinearGradient
-                colors={['rgba(15,23,42,0.2)', 'rgba(15,23,42,0.65)', 'rgba(15,23,42,0.98)']}
-                style={styles.gradientOverlay}
-              />
             </Animated.View>
           )}
 
-          {/* CARTÃO PRINCIPAL INTERATIVO (SWIPE FULL SCREEN TIKTOK + TINDER) */}
+          {/* CARTÃO PRINCIPAL INTERATIVO (CARD EDITORIAL TECH FATEC) */}
           {currentItem && (
             <Animated.View
               {...panResponder.panHandlers}
-              style={[styles.cardContainer, styles.activeCard, animatedCardStyle]}
+              style={[
+                styles.cardContainer,
+                styles.activeCard,
+                {
+                  height: calculatedCardHeight,
+                  width: dynamicCardWidth,
+                },
+                animatedCardStyle,
+              ]}
             >
-              {/* Imagem de Fundo em Tela Cheia com fundo 100% opaco */}
-              <View style={styles.imageWrapper}>
+              {/* 1. TOPO: BANNER VISUAL SHOWCASE COM FUSÃO GRADIENTE */}
+              <View
+                style={[
+                  styles.showcaseBannerContainer,
+                  { height: calculatedCardHeight < 420 ? 105 : 135 },
+                ]}
+                pointerEvents="none"
+              >
                 <Image
                   source={{ uri: currentImageUrl }}
-                  style={styles.cardImage}
+                  style={styles.showcaseImage}
                   resizeMode="cover"
+                />
+                <LinearGradient
+                  colors={['rgba(11,17,30,0.15)', 'rgba(19,29,49,0.65)', '#131D31']}
+                  style={styles.showcaseGradient}
                 />
               </View>
 
-              {/* Gradiente Escuro de Contraste Profissional */}
-              <LinearGradient
-                colors={['rgba(15,23,42,0.2)', 'rgba(15,23,42,0.58)', 'rgba(15,23,42,0.98)']}
-                style={styles.gradientOverlay}
-              />
-
-              {/* CARIMBOS DE SWIPE (STAMPS) */}
-              <Animated.View style={[styles.stamp, styles.likeStamp, { opacity: likeOpacity }]}>
-                <Ionicons name="heart" size={26} color="#10B981" />
-                <Text style={styles.likeStampText}>TENHO INTERESSE</Text>
-              </Animated.View>
-
-              <Animated.View style={[styles.stamp, styles.passStamp, { opacity: passOpacity }]}>
-                <Ionicons name="close" size={26} color="#EF4444" />
-                <Text style={styles.passStampText}>PASSAR</Text>
-              </Animated.View>
-
-              {/* OVERLAY SUPERIOR: BADGES & MATCH RATE */}
-              <View style={styles.topBadgesRow}>
-                {/* Match Score Real com indicador verde */}
-                <View style={styles.matchPill}>
-                  <View style={styles.matchDot} />
-                  <Text style={styles.matchPillText}>{currentItem.matchScore || 95}% Match Real</Text>
+              {/* 2. RIBBON INSTITUCIONAL SUPERIOR: INSÍGNIA CPS & MEDIDOR DE AFINIDADE FATEC */}
+              <View style={styles.topCredentialRibbon} pointerEvents="none">
+                {/* Micro-insígnia FATEC / CPS */}
+                <View style={styles.institutionBadge}>
+                  <View style={styles.institutionDot} />
+                  <Text style={styles.institutionBadgeText}>
+                    {isAluno ? 'CPS • VAGA VERIFICADA' : (currentItem.unidadeFatec || 'CPS • FATEC JALES')}
+                  </Text>
                 </View>
 
-                {/* Modalidade / Turno */}
-                <View style={styles.modalityPill}>
-                  <Ionicons
-                    name={isAluno ? 'business-outline' : 'school-outline'}
-                    size={13}
-                    color="#FFFFFF"
-                  />
-                  <Text style={styles.modalityPillText}>
-                    {isAluno ? currentItem.modalidade : currentItem.unidadeFatec}
-                  </Text>
+                {/* Afinidade Curricular FATEC */}
+                <View style={styles.affinityPill}>
+                  <Ionicons name="sparkles" size={12} color="#10B981" />
+                  <Text style={styles.affinityPillText}>{currentItem.matchScore || 95}% Afinidade</Text>
                 </View>
               </View>
 
-              {/* CONTEÚDO PRINCIPAL SOBRE O GRADIENTE INFERIOR */}
-              <View style={styles.contentOverlay}>
-                {/* Título Principal & Empresa/Curso */}
-                <View style={styles.titleSection}>
-                  <View style={styles.verifiedRow}>
-                    <Text style={styles.organizationText} numberOfLines={1}>
-                      {isAluno ? currentItem.nomeFantasia || currentItem.empresa : currentItem.curso}
-                    </Text>
-                    <Ionicons name="checkmark-circle" size={17} color={Colors.primary} />
-                  </View>
-
-                  <Text style={styles.mainTitle} numberOfLines={2}>
-                    {isAluno ? currentItem.cargo : (currentItem.idade ? `${currentItem.nome}, ${currentItem.idade} anos` : currentItem.nome)}
-                  </Text>
+              {/* 3. AURA DE DECISÃO DIRECIIONAL (SUBSTITUI OS CARIMBOS GENÉRICOS) */}
+              <Animated.View
+                pointerEvents="none"
+                style={[styles.decisionAuraBar, styles.decisionAuraConnect, { opacity: likeOpacity }]}
+              >
+                <View style={styles.decisionIconCircleConnect}>
+                  <Ionicons name="git-network" size={15} color="#10B981" />
                 </View>
+                <Text style={styles.decisionAuraTextConnect}>
+                  {isAluno ? '✦ CONECTAR OPORTUNIDADE' : '✦ CONECTAR TALENTO'}
+                </Text>
+              </Animated.View>
 
-                {/* Métricas Rápidas: Bolsa & Localização */}
-                <View style={styles.metaRow}>
-                  {isAluno ? (
-                    <View style={styles.bolsaBadge}>
-                      <Ionicons name="cash-outline" size={14} color="#10B981" />
-                      <Text style={styles.bolsaBadgeText}>{currentItem.bolsa}</Text>
-                    </View>
-                  ) : (
-                    <View style={styles.bolsaBadge}>
-                      <Ionicons name="time-outline" size={14} color="#10B981" />
-                      <Text style={styles.bolsaBadgeText}>
-                        {currentItem.semestre || 'Semestre ativo'} • {currentItem.disponibilidade || 'Disponível'}
+              <Animated.View
+                pointerEvents="none"
+                style={[styles.decisionAuraBar, styles.decisionAuraPass, { opacity: passOpacity }]}
+              >
+                <View style={styles.decisionIconCirclePass}>
+                  <Ionicons name="arrow-forward" size={15} color="#94A3B8" />
+                </View>
+                <Text style={styles.decisionAuraTextPass}>AVANÇAR PRÓXIMO</Text>
+              </Animated.View>
+
+              {/* 4. CORPO EDITORIAL DO CARD */}
+              <View style={styles.cardEditorialBody}>
+                {/* Identidade: Avatar com borda nobre + Organização / Estudante */}
+                <View style={[styles.identityHeaderRow, calculatedCardHeight < 420 && { marginTop: -18, marginBottom: 2 }]}>
+                  <EntityAvatar
+                    uri={currentItem.imagemUrl}
+                    name={isAluno ? (currentItem.nomeFantasia || currentItem.empresa || 'Empresa') : (currentItem.nome || 'Estudante')}
+                    size={calculatedCardHeight < 420 ? 38 : 44}
+                    borderColor={isAluno ? '#38BDF8' : '#10B981'}
+                    borderWidth={2}
+                  />
+                  <View style={styles.identityTextCol}>
+                    <View style={styles.verifiedRow}>
+                      <Text style={[styles.identityOrgText, calculatedCardHeight < 420 && { fontSize: 13.5 }]} numberOfLines={1}>
+                        {isAluno
+                          ? (currentItem.nomeFantasia || currentItem.empresa)
+                          : (currentItem.idade ? `${currentItem.nome}, ${currentItem.idade} anos` : currentItem.nome)}
                       </Text>
+                      <Ionicons
+                        name="checkmark-circle"
+                        size={15}
+                        color={isAluno ? Colors.primary : '#10B981'}
+                      />
                     </View>
-                  )}
-
-                  <View style={styles.locationBadge}>
-                    <Ionicons name="location-outline" size={14} color="#CBD5E1" />
-                    <Text style={styles.locationBadgeText} numberOfLines={1}>
-                      {isAluno ? currentItem.localizacao : currentItem.unidadeFatec || 'Fatec Jales'}
+                    <Text style={[styles.identityTrackText, calculatedCardHeight < 420 && { fontSize: 11 }]} numberOfLines={1}>
+                      {isAluno
+                        ? (currentItem.area || currentItem.cursoRelacionado || 'Tecnologia da Informação')
+                        : (currentItem.curso || 'Fatec Jales')}
                     </Text>
                   </View>
                 </View>
 
-                {/* Tags de Requisitos / Competências */}
-                <View style={styles.tagsRow}>
+                {/* Título Principal: Cargo ou Curso / Especialidade */}
+                <Text style={[styles.cardMainTitle, calculatedCardHeight < 420 && { fontSize: 15.5, lineHeight: 19, marginBottom: 4 }]} numberOfLines={2}>
+                  {isAluno ? currentItem.cargo : (currentItem.unidadeFatec ? `${currentItem.curso} • ${currentItem.unidadeFatec}` : currentItem.curso)}
+                </Text>
+
+                {/* TRÍADE DE RELEVÂNCIA (3 MICRO-BADGES ESTRUTURADOS) */}
+                <View style={[styles.relevanceTriadRow, calculatedCardHeight < 420 && { marginBottom: 4 }]}>
+                  {/* Micro-badge 1: Remuneração / Bolsa / Horário */}
+                  <View style={styles.triadPillEmerald}>
+                    <Ionicons name={isAluno ? 'cash-outline' : 'time-outline'} size={12} color="#10B981" />
+                    <Text style={styles.triadPillEmeraldText} numberOfLines={1}>
+                      {isAluno ? (currentItem.bolsa || 'A combinar') : `${currentItem.semestre || 'Ativo'} • ${currentItem.disponibilidade || 'Disponível'}`}
+                    </Text>
+                  </View>
+
+                  {/* Micro-badge 2: Polo / Localização */}
+                  <View style={styles.triadPillSlate}>
+                    <Ionicons name="location-outline" size={12} color="#CBD5E1" />
+                    <Text style={[styles.triadPillSlateText, isSmallScreen && { maxWidth: 120 }]} numberOfLines={1}>
+                      {isAluno ? (currentItem.localizacao || 'Fatec Jales') : (currentItem.unidadeFatec || currentItem.localizacao || 'Fatec Jales')}
+                    </Text>
+                  </View>
+
+                  {/* Micro-badge 3: Regime / Modalidade */}
+                  <View style={styles.triadPillCyan}>
+                    <Ionicons name={isAluno ? 'briefcase-outline' : 'laptop-outline'} size={12} color="#38BDF8" />
+                    <Text style={styles.triadPillCyanText} numberOfLines={1}>
+                      {isAluno ? (currentItem.modalidade || currentItem.tipo || 'Presencial') : (currentItem.modalidadeDesejada || 'Presencial / Híbrido')}
+                    </Text>
+                  </View>
+                </View>
+
+                {/* DESTAQUE DE PROJETO / DESAFIO TÉCNICO */}
+                {!isAluno && currentItem.projetos && currentItem.projetos.length > 0 ? (
+                  <View style={[styles.projectSpotlightBox, calculatedCardHeight < 420 && { paddingVertical: 2.5, marginBottom: 4 }]}>
+                    <Ionicons name="rocket-outline" size={11} color="#F59E0B" />
+                    <Text style={styles.projectSpotlightLabel}>Portfólio:</Text>
+                    <Text style={styles.projectSpotlightTitle} numberOfLines={1}>
+                      {currentItem.projetos[0].titulo}
+                      {currentItem.projetos[0].tecnologias?.length ? ` (${currentItem.projetos[0].tecnologias.slice(0, 2).join(', ')})` : ''}
+                    </Text>
+                  </View>
+                ) : isAluno && currentItem.area ? (
+                  <View style={[styles.projectSpotlightBox, calculatedCardHeight < 420 && { paddingVertical: 2.5, marginBottom: 4 }]}>
+                    <Ionicons name="flash-outline" size={11} color="#38BDF8" />
+                    <Text style={[styles.projectSpotlightLabel, { color: '#38BDF8' }]}>Desafio:</Text>
+                    <Text style={styles.projectSpotlightTitle} numberOfLines={1}>
+                      {currentItem.area} • Inovação e Desenvolvimento
+                    </Text>
+                  </View>
+                ) : null}
+
+                {/* SÍNTESE CURRICULAR / RESUMO */}
+                <Text style={[styles.summaryExcerpt, calculatedCardHeight < 420 && { fontSize: 11, lineHeight: 15, marginBottom: 4 }]} numberOfLines={2}>
+                  {isAluno
+                    ? (currentItem.descricao || 'Oportunidade conectada aos cursos de tecnologia da Fatec.')
+                    : (currentItem.sobre || 'Estudante da Fatec focado em desenvolvimento prático e novos desafios.')}
+                </Text>
+
+                {/* DNA TECNOLÓGICO (TAGS COM PONTOS DE PRECISÃO) */}
+                <View style={[styles.techDnaRow, calculatedCardHeight < 420 && { marginBottom: 5 }]}>
                   {(isAluno ? currentItem.requisitos : currentItem.competencias)?.slice(0, 3).map((tag: string, i: number) => (
-                    <View key={i} style={styles.tagPill}>
-                      <Text style={styles.tagPillText} numberOfLines={1}>
-                        {tag}
-                      </Text>
+                    <View key={i} style={styles.techDnaPill}>
+                      <View style={styles.techDnaDot} />
+                      <Text style={[styles.techDnaPillText, isSmallScreen && { maxWidth: 130 }]} numberOfLines={1}>{tag}</Text>
                     </View>
                   ))}
                   {((isAluno ? currentItem.requisitos : currentItem.competencias)?.length || 0) > 3 && (
-                    <View style={styles.tagMorePill}>
-                      <Text style={styles.tagMoreText}>
+                    <View style={styles.techDnaMorePill}>
+                      <Text style={styles.techDnaMoreText}>
                         +{((isAluno ? currentItem.requisitos : currentItem.competencias)?.length || 0) - 3}
                       </Text>
                     </View>
                   )}
                 </View>
 
-                {/* Botão Ver Detalhes Expandido */}
+                {/* AFFORDANCE DE DOSSIÊ / DETALHES COMPACTO */}
                 <TouchableOpacity
-                  style={styles.detailsButton}
+                  style={styles.cardDetailHintRow}
                   onPress={handleOpenDetails}
-                  activeOpacity={0.85}
+                  activeOpacity={0.7}
                 >
-                  <Text style={styles.detailsButtonText}>
-                    {isAluno ? 'VER DETALHES DA VAGA' : 'VER PERFIL COMPLETO'}
+                  <Ionicons name="document-text-outline" size={12} color="#38BDF8" />
+                  <Text style={styles.cardDetailHintText} numberOfLines={1}>
+                    {isAluno ? 'Toque no Dossiê para requisitos completos' : 'Toque no Dossiê para competências e projetos'}
                   </Text>
-                  <Ionicons name="arrow-forward" size={16} color="#FFFFFF" />
+                  <Ionicons name="chevron-forward" size={11} color="#38BDF8" />
                 </TouchableOpacity>
               </View>
             </Animated.View>
           )}
 
-          {/* BOTÕES FIXOS INFERIORES: ❌ (PASSAR), ↩️ (DESFAZER) E ❤️ (INTERESSE) */}
-          <View style={styles.floatingActionRow}>
-            {/* Botão X — Não Tenho Interesse */}
-            <TouchableOpacity
-              style={[styles.actionBtnCircle, styles.passBtnCircle]}
-              onPress={() => executeDecision('pass')}
-              activeOpacity={0.8}
-            >
-              <Ionicons name="close" size={30} color="#EF4444" />
-            </TouchableOpacity>
+          {/* FATELINK ACTION DOCK — CÁPSULA UNIFICADA DE DECISÃO PROFISSIONAL */}
+          <View
+            style={[
+              styles.fatelinkDockContainer,
+              { top: calculatedCardHeight + 8 },
+            ]}
+          >
+            <View style={[styles.fatelinkDock, isSmallScreen && styles.fatelinkDockCompact]}>
+              {/* 1. Pular / Próximo */}
+              <TouchableOpacity
+                style={[styles.dockActionBtn, isSmallScreen && styles.dockActionBtnCompact]}
+                onPress={() => executeDecision('pass')}
+                activeOpacity={0.75}
+                accessibilityLabel="Avançar para o próximo"
+              >
+                <View style={styles.dockIconBoxPass}>
+                  <Ionicons name="close" size={isSmallScreen ? 17 : 19} color="#EF4444" />
+                </View>
+                {!isSmallScreen && <Text style={styles.dockLabelPass}>Pular</Text>}
+              </TouchableOpacity>
 
-            {/* Botão Central — Desfazer / Info */}
-            <TouchableOpacity
-              style={[styles.actionBtnCircle, styles.undoBtnCircle, !lastAction && { opacity: 0.4 }]}
-              onPress={handleUndo}
-              disabled={!lastAction}
-              activeOpacity={0.8}
-            >
-              <Ionicons name="arrow-undo" size={20} color="#64748B" />
-            </TouchableOpacity>
+              {/* 2. Desfazer (Undo) */}
+              <TouchableOpacity
+                style={[styles.dockMiniBtn, !lastAction && { opacity: 0.25 }]}
+                onPress={handleUndo}
+                disabled={!lastAction}
+                activeOpacity={0.7}
+                accessibilityLabel="Desfazer última decisão"
+              >
+                <Ionicons name="arrow-undo" size={16} color="#94A3B8" />
+              </TouchableOpacity>
 
-            {/* Botão Coração — Tenho Interesse */}
-            <TouchableOpacity
-              style={[styles.actionBtnCircle, styles.likeBtnCircle]}
-              onPress={() => executeDecision('like')}
-              activeOpacity={0.8}
-            >
-              <Ionicons name="heart" size={32} color="#10B981" />
-            </TouchableOpacity>
+              {/* Separador vertical sutil */}
+              <View style={styles.dockDivider} />
+
+              {/* 3. Dossiê Completo */}
+              <TouchableOpacity
+                style={[styles.dockInspectBtn, isSmallScreen && styles.dockInspectBtnCompact]}
+                onPress={handleOpenDetails}
+                activeOpacity={0.8}
+                accessibilityLabel="Abrir dossiê técnico detalhado"
+              >
+                <Ionicons name="newspaper-outline" size={15} color="#38BDF8" />
+                <Text style={styles.dockInspectText}>Dossiê</Text>
+              </TouchableOpacity>
+
+              {/* Separador vertical sutil */}
+              <View style={styles.dockDivider} />
+
+              {/* 4. Conectar (Ação Principal com Destaque Institucional) */}
+              <TouchableOpacity
+                style={styles.dockConnectBtn}
+                onPress={() => executeDecision('like')}
+                activeOpacity={0.85}
+                accessibilityLabel="Conectar e demonstrar afinidade mútua"
+              >
+                <LinearGradient
+                  colors={['#10B981', '#059669']}
+                  start={{ x: 0, y: 0 }}
+                  end={{ x: 1, y: 1 }}
+                  style={[styles.dockConnectGradient, isSmallScreen && styles.dockConnectGradientCompact]}
+                >
+                  <Ionicons name="git-network" size={isSmallScreen ? 15 : 17} color="#FFFFFF" />
+                  <Text style={[styles.dockConnectText, isSmallScreen && { fontSize: 12 }]}>Conectar</Text>
+                </LinearGradient>
+              </TouchableOpacity>
+            </View>
           </View>
         </View>
         )
@@ -762,16 +1451,17 @@ export const ListScreen: React.FC<ListScreenProps> = ({
             if (onApplyToOpportunity) {
               onApplyToOpportunity(selectedOpp);
             } else {
-              onStartChat(selectedOpp.nomeFantasia, selectedOpp.cargo);
+              const vagaDbId = selectedOpp.dbId || parseInt(String(selectedOpp.id || '').replace('opp-', ''), 10);
+              onStartChat(selectedOpp.nomeFantasia, selectedOpp.cargo, selectedOpp.empresaId, isNaN(vagaDbId) ? undefined : vagaDbId);
             }
           } else if (!isAluno && selectedCand) {
-            onStartChat(selectedCand.nome, selectedCand.curso);
+            onStartChat(selectedCand.nome, selectedCand.curso, selectedCand.usuarioId, undefined);
           }
         }}
         actionLabel={isAluno ? 'CANDIDATAR-SE AGORA 🚀' : 'INICIAR CONVERSA'}
       />
 
-      {/* Modal Celebratório de Match Mútuo */}
+      {/* Modal Celebratório: CONEXÃO ESTABELECIDA (FATELINK NEXUS) */}
       <Modal
         visible={!!mutualMatchInfo}
         transparent
@@ -780,31 +1470,104 @@ export const ListScreen: React.FC<ListScreenProps> = ({
       >
         <View style={styles.matchModalOverlay}>
           <View style={styles.matchModalCard}>
-            <View style={styles.matchModalIconCircle}>
-              <Ionicons name="flame" size={44} color="#FFFFFF" />
+            {/* Top Nexus Badge */}
+            <View style={styles.nexusIconCircle}>
+              <Ionicons name="git-network" size={32} color="#FFFFFF" />
             </View>
-            <Text style={styles.matchModalTitle}>DEU MATCH! 🎉</Text>
+
+            <View style={styles.nexusPill}>
+              <Ionicons name="sparkles" size={12} color="#10B981" />
+              <Text style={styles.nexusPillText}>ELO PROFISSIONAL CONFIRMADO</Text>
+            </View>
+
+            <Text style={styles.matchModalTitle}>Conexão Estabelecida!</Text>
+
             <Text style={styles.matchModalSubtitle}>
-              Vocês demonstraram interesse mútuo! Ambos estão prontos para avançar no processo seletivo.
+              Afinidade bilateral confirmada entre o perfil FATEC e a oportunidade. As competências e diretrizes curriculares estão em plena sinergia.
             </Text>
+
+            {/* Apresentação Dupla Bilateral (Aluno & Empresa) */}
+            <View style={styles.matchDualAvatarSection}>
+              {/* Lado Aluno */}
+              <View style={styles.matchAvatarCol}>
+                <EntityAvatar
+                  uri={mutualMatchInfo?.alunoImagem}
+                  name={mutualMatchInfo?.alunoNome || 'Estudante'}
+                  size={64}
+                  borderColor="#10B981"
+                  borderWidth={2.5}
+                />
+                <Text style={styles.matchAvatarName} numberOfLines={1}>
+                  {mutualMatchInfo?.alunoNome || 'Estudante'}
+                </Text>
+                <Text style={styles.matchAvatarRole}>Estudante FATEC</Text>
+              </View>
+
+              {/* Ponte de Rede Central */}
+              <View style={styles.matchConnector}>
+                <View style={styles.matchConnectorLine} />
+                <View style={styles.matchNexusCircle}>
+                  <Ionicons name="git-commit-outline" size={18} color="#FFFFFF" />
+                </View>
+              </View>
+
+              {/* Lado Empresa */}
+              <View style={styles.matchAvatarCol}>
+                <EntityAvatar
+                  uri={mutualMatchInfo?.empresaImagem}
+                  name={mutualMatchInfo?.empresaNome || 'Empresa'}
+                  size={64}
+                  borderColor="#38BDF8"
+                  borderWidth={2.5}
+                />
+                <Text style={styles.matchAvatarName} numberOfLines={1}>
+                  {mutualMatchInfo?.empresaNome || 'Empresa'}
+                </Text>
+                <Text style={styles.matchAvatarRole}>Empresa Parceira</Text>
+              </View>
+            </View>
+
+            {/* Detalhes da Vaga e Afinidade */}
+            <View style={styles.matchDetailsBox}>
+              <Text style={styles.matchDetailsLabel}>OPORTUNIDADE EM FOCO</Text>
+              <Text style={styles.matchDetailsCargo} numberOfLines={1}>
+                {mutualMatchInfo?.cargo || 'Vaga em Tecnologia'}
+              </Text>
+              <View style={styles.matchScoreRow}>
+                <Ionicons name="shield-checkmark" size={14} color="#10B981" />
+                <Text style={styles.matchScoreText}>
+                  {mutualMatchInfo?.matchScore || 95}% de Afinidade Curricular
+                </Text>
+              </View>
+            </View>
+
+            {/* Botões de Ação */}
             <View style={styles.matchModalButtons}>
               <TouchableOpacity
                 style={styles.matchModalPrimaryBtn}
                 onPress={() => {
                   const info = mutualMatchInfo;
                   setMutualMatchInfo(null);
-                  onStartChat(info?.empresaNome || info?.alunoNome || 'Contato FATEC', info?.cargo || 'Oportunidade');
+                  const targetId = isAluno ? info?.empresaId : info?.alunoId;
+                  onStartChat(
+                    info?.empresaNome || info?.alunoNome || 'Contato FATEC',
+                    info?.cargo || 'Oportunidade',
+                    targetId,
+                    info?.vagaId
+                  );
                 }}
                 activeOpacity={0.85}
               >
                 <Ionicons name="chatbubbles" size={18} color="#FFFFFF" />
-                <Text style={styles.matchModalPrimaryBtnText}>Conversar Agora</Text>
+                <Text style={styles.matchModalPrimaryBtnText}>Iniciar Diálogo Técnico</Text>
               </TouchableOpacity>
+
               <TouchableOpacity
                 style={styles.matchModalCloseBtn}
                 onPress={() => setMutualMatchInfo(null)}
+                activeOpacity={0.7}
               >
-                <Text style={styles.matchModalCloseBtnText}>Continuar Navegando</Text>
+                <Text style={styles.matchModalCloseBtnText}>Continuar Explorando o Feed</Text>
               </TouchableOpacity>
             </View>
           </View>
@@ -824,14 +1587,17 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
     backgroundColor: '#1E293B',
-    marginHorizontal: 16,
-    marginTop: 8,
-    marginBottom: 6,
+    marginHorizontal: 12,
+    marginTop: 6,
+    marginBottom: 4,
     borderRadius: 14,
     padding: 3,
     borderWidth: 1,
     borderColor: '#334155',
     zIndex: 20,
+    maxWidth: 500,
+    alignSelf: 'center',
+    width: '94%',
   },
   viewModeBtn: {
     flex: 1,
@@ -875,22 +1641,30 @@ const styles = StyleSheet.create({
     justifyContent: 'flex-start',
     alignItems: 'center',
     width: '100%',
+    maxWidth: 500,
+    alignSelf: 'center',
   },
   cardContainer: {
     position: 'absolute',
-    top: 6,
-    height: '80%',
-    maxHeight: 660,
-    width: SCREEN_WIDTH > 540 ? 490 : '92%',
+    top: 2,
     alignSelf: 'center',
-    borderRadius: 24,
+    borderRadius: 22,
     overflow: 'hidden',
-    backgroundColor: '#1E293B',
+    backgroundColor: '#131D31',
     shadowColor: '#000',
-    shadowOffset: { width: 0, height: 8 },
-    shadowOpacity: 0.35,
+    shadowOffset: { width: 0, height: 6 },
+    shadowOpacity: 0.42,
     shadowRadius: 16,
     elevation: 8,
+    borderWidth: 1.5,
+    borderColor: 'rgba(255, 255, 255, 0.12)',
+    ...(Platform.OS === 'web'
+      ? {
+          userSelect: 'none' as any,
+          cursor: 'grab' as any,
+          touchAction: 'none' as any,
+        }
+      : {}),
   },
   activeCard: {
     zIndex: 10,
@@ -900,265 +1674,440 @@ const styles = StyleSheet.create({
     zIndex: 1,
     elevation: 1,
   },
-  imageWrapper: {
-    position: 'absolute',
-    top: 0,
-    left: 0,
-    right: 0,
-    bottom: 0,
-    backgroundColor: '#0F172A',
+
+  // Showcase Visual Superior com Gradiente Suave
+  showcaseBannerContainer: {
+    width: '100%',
+    position: 'relative',
+    backgroundColor: '#090E17',
     overflow: 'hidden',
   },
-  cardImage: {
+  showcaseImage: {
     width: '100%',
     height: '100%',
-    backgroundColor: '#0F172A',
+    backgroundColor: '#090E17',
   },
-  gradientOverlay: {
+  showcaseGradient: {
     position: 'absolute',
     left: 0,
     right: 0,
     top: 0,
     bottom: 0,
   },
-  stamp: {
+
+  // Ribbon Institucional Superior (CPS / FATEC + Medidor de Afinidade)
+  topCredentialRibbon: {
     position: 'absolute',
-    top: 60,
-    flexDirection: 'row',
-    alignItems: 'center',
-    paddingHorizontal: 16,
-    paddingVertical: 8,
-    borderRadius: 12,
-    borderWidth: 3,
-    gap: 8,
-    zIndex: 20,
-  },
-  likeStamp: {
-    left: 24,
-    borderColor: '#10B981',
-    backgroundColor: 'rgba(16, 185, 129, 0.15)',
-    transform: [{ rotate: '-12deg' }],
-  },
-  likeStampText: {
-    color: '#10B981',
-    fontSize: 18,
-    fontWeight: '900',
-    letterSpacing: 1,
-  },
-  passStamp: {
-    right: 24,
-    borderColor: '#EF4444',
-    backgroundColor: 'rgba(239, 68, 68, 0.15)',
-    transform: [{ rotate: '12deg' }],
-  },
-  passStampText: {
-    color: '#EF4444',
-    fontSize: 18,
-    fontWeight: '900',
-    letterSpacing: 1,
-  },
-  topBadgesRow: {
-    position: 'absolute',
-    top: 18,
-    left: 16,
-    right: 16,
+    top: 10,
+    left: 12,
+    right: 12,
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
-    zIndex: 10,
+    zIndex: 15,
   },
-  matchPill: {
+  institutionBadge: {
     flexDirection: 'row',
     alignItems: 'center',
-    backgroundColor: 'rgba(15, 23, 42, 0.85)',
-    paddingHorizontal: 12,
-    paddingVertical: 6,
-    borderRadius: 20,
-    gap: 6,
+    backgroundColor: 'rgba(9, 14, 23, 0.88)',
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+    borderRadius: 12,
+    gap: 5,
     borderWidth: 1,
-    borderColor: 'rgba(16, 185, 129, 0.4)',
+    borderColor: 'rgba(255, 255, 255, 0.16)',
   },
-  matchDot: {
-    width: 8,
-    height: 8,
-    borderRadius: 4,
-    backgroundColor: '#10B981',
+  institutionDot: {
+    width: 6,
+    height: 6,
+    borderRadius: 3,
+    backgroundColor: '#B11216', // Vermelho Institucional Centro Paula Souza / FATEC
   },
-  matchPillText: {
+  institutionBadgeText: {
+    color: '#F1F5F9',
+    fontSize: 9.5,
+    fontWeight: '800',
+    letterSpacing: 0.5,
+    textTransform: 'uppercase',
+  },
+  affinityPill: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: 'rgba(9, 14, 23, 0.9)',
+    paddingHorizontal: 9,
+    paddingVertical: 4,
+    borderRadius: 12,
+    gap: 4,
+    borderWidth: 1,
+    borderColor: 'rgba(16, 185, 129, 0.5)',
+  },
+  affinityPillText: {
     color: '#10B981',
-    fontSize: 12,
+    fontSize: 10.5,
     fontWeight: '800',
   },
-  modalityPill: {
+
+  // Aura de Decisão FateLink (Substitui os carimbos de swipe inclinados)
+  decisionAuraBar: {
+    position: 'absolute',
+    top: 48,
+    alignSelf: 'center',
     flexDirection: 'row',
     alignItems: 'center',
-    backgroundColor: 'rgba(15, 23, 42, 0.85)',
-    paddingHorizontal: 12,
-    paddingVertical: 6,
+    paddingHorizontal: 14,
+    paddingVertical: 7,
     borderRadius: 20,
-    gap: 6,
-    borderWidth: 1,
-    borderColor: 'rgba(255, 255, 255, 0.2)',
+    borderWidth: 1.5,
+    gap: 7,
+    zIndex: 30,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.35,
+    shadowRadius: 8,
+    elevation: 6,
   },
-  modalityPillText: {
-    color: '#FFFFFF',
-    fontSize: 12,
-    fontWeight: '700',
+  decisionAuraConnect: {
+    borderColor: '#10B981',
+    backgroundColor: 'rgba(9, 14, 23, 0.94)',
   },
-  contentOverlay: {
-    position: 'absolute',
-    left: 18,
-    right: 18,
-    bottom: 18,
-    zIndex: 10,
+  decisionIconCircleConnect: {
+    width: 22,
+    height: 22,
+    borderRadius: 11,
+    backgroundColor: 'rgba(16, 185, 129, 0.22)',
+    alignItems: 'center',
+    justifyContent: 'center',
   },
-  titleSection: {
-    marginBottom: 10,
+  decisionAuraTextConnect: {
+    color: '#10B981',
+    fontSize: 11,
+    fontWeight: '900',
+    letterSpacing: 0.7,
+  },
+  decisionAuraPass: {
+    borderColor: '#94A3B8',
+    backgroundColor: 'rgba(9, 14, 23, 0.94)',
+  },
+  decisionIconCirclePass: {
+    width: 22,
+    height: 22,
+    borderRadius: 11,
+    backgroundColor: 'rgba(148, 163, 184, 0.22)',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  decisionAuraTextPass: {
+    color: '#E2E8F0',
+    fontSize: 11,
+    fontWeight: '800',
+    letterSpacing: 0.7,
+  },
+
+  // Corpo Editorial do Card
+  cardEditorialBody: {
+    flex: 1,
+    paddingHorizontal: 14,
+    paddingTop: 4,
+    paddingBottom: 8,
+    justifyContent: 'space-between',
+  },
+  identityHeaderRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+    marginTop: -20,
+    marginBottom: 4,
+  },
+  identityTextCol: {
+    flex: 1,
   },
   verifiedRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 6,
-    marginBottom: 4,
+    gap: 5,
+    marginBottom: 1,
   },
-  organizationText: {
-    color: '#E2E8F0',
+  identityOrgText: {
+    color: '#FFFFFF',
     fontSize: 14,
-    fontWeight: '700',
-    letterSpacing: 0.3,
+    fontWeight: '800',
+    letterSpacing: 0.2,
   },
-  mainTitle: {
+  identityTrackText: {
+    color: '#94A3B8',
+    fontSize: 11.5,
+    fontWeight: '600',
+  },
+  cardMainTitle: {
     color: '#FFFFFF',
-    fontSize: 24,
+    fontSize: 17,
     fontWeight: '900',
-    letterSpacing: -0.4,
-    lineHeight: 28,
+    lineHeight: 21,
+    letterSpacing: -0.3,
+    marginBottom: 6,
   },
-  metaRow: {
+
+  // Tríade de Relevância
+  relevanceTriadRow: {
     flexDirection: 'row',
     alignItems: 'center',
+    gap: 4,
+    marginBottom: 6,
     flexWrap: 'wrap',
-    gap: 8,
-    marginBottom: 12,
   },
-  bolsaBadge: {
+  triadPillEmerald: {
     flexDirection: 'row',
     alignItems: 'center',
-    backgroundColor: 'rgba(16, 185, 129, 0.18)',
+    backgroundColor: 'rgba(16, 185, 129, 0.14)',
     borderWidth: 1,
-    borderColor: 'rgba(16, 185, 129, 0.4)',
-    paddingHorizontal: 10,
-    paddingVertical: 5,
-    borderRadius: 10,
-    gap: 5,
+    borderColor: 'rgba(16, 185, 129, 0.35)',
+    paddingHorizontal: 7,
+    paddingVertical: 3.5,
+    borderRadius: 8,
+    gap: 4,
   },
-  bolsaBadgeText: {
+  triadPillEmeraldText: {
     color: '#10B981',
-    fontSize: 13,
+    fontSize: 10.5,
     fontWeight: '800',
   },
-  locationBadge: {
+  triadPillSlate: {
     flexDirection: 'row',
     alignItems: 'center',
-    backgroundColor: 'rgba(30, 41, 59, 0.85)',
-    paddingHorizontal: 10,
-    paddingVertical: 5,
-    borderRadius: 10,
-    gap: 5,
-  },
-  locationBadgeText: {
-    color: '#CBD5E1',
-    fontSize: 12,
-    fontWeight: '600',
-  },
-  tagsRow: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
-    gap: 6,
-    marginBottom: 14,
-  },
-  tagPill: {
-    backgroundColor: 'rgba(255, 255, 255, 0.12)',
-    paddingHorizontal: 10,
-    paddingVertical: 4,
-    borderRadius: 8,
+    backgroundColor: 'rgba(30, 41, 59, 0.75)',
     borderWidth: 1,
-    borderColor: 'rgba(255, 255, 255, 0.15)',
+    borderColor: 'rgba(255, 255, 255, 0.1)',
+    paddingHorizontal: 7,
+    paddingVertical: 3.5,
+    borderRadius: 8,
+    gap: 4,
   },
-  tagPillText: {
-    color: '#F1F5F9',
-    fontSize: 11,
+  triadPillSlateText: {
+    color: '#CBD5E1',
+    fontSize: 10.5,
     fontWeight: '600',
   },
-  tagMorePill: {
-    backgroundColor: 'rgba(255, 255, 255, 0.2)',
-    paddingHorizontal: 8,
-    paddingVertical: 4,
+  triadPillCyan: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: 'rgba(56, 189, 248, 0.12)',
+    borderWidth: 1,
+    borderColor: 'rgba(56, 189, 248, 0.3)',
+    paddingHorizontal: 7,
+    paddingVertical: 3.5,
     borderRadius: 8,
+    gap: 4,
   },
-  tagMoreText: {
+  triadPillCyanText: {
+    color: '#38BDF8',
+    fontSize: 10.5,
+    fontWeight: '700',
+  },
+
+  // Destaque de Projeto e Resumo
+  projectSpotlightBox: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: 'rgba(245, 158, 11, 0.12)',
+    borderWidth: 1,
+    borderColor: 'rgba(245, 158, 11, 0.3)',
+    paddingHorizontal: 8,
+    paddingVertical: 3,
+    borderRadius: 8,
+    gap: 5,
+    marginBottom: 5,
+  },
+  projectSpotlightLabel: {
+    color: '#F59E0B',
+    fontSize: 9.5,
+    fontWeight: '800',
+    textTransform: 'uppercase',
+  },
+  projectSpotlightTitle: {
+    color: '#FEF3C7',
+    fontSize: 10.5,
+    fontWeight: '600',
+    flex: 1,
+  },
+  summaryExcerpt: {
+    color: '#CBD5E1',
+    fontSize: 11.5,
+    lineHeight: 16,
+    fontWeight: '500',
+    marginBottom: 6,
+  },
+
+  // DNA Tecnológico
+  techDnaRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    flexWrap: 'wrap',
+    gap: 4,
+    marginBottom: 6,
+  },
+  techDnaPill: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: 'rgba(255, 255, 255, 0.08)',
+    paddingHorizontal: 7,
+    paddingVertical: 3,
+    borderRadius: 6,
+    borderWidth: 1,
+    borderColor: 'rgba(255, 255, 255, 0.12)',
+    gap: 4,
+  },
+  techDnaDot: {
+    width: 4,
+    height: 4,
+    borderRadius: 2,
+    backgroundColor: '#38BDF8',
+  },
+  techDnaPillText: {
+    color: '#F1F5F9',
+    fontSize: 10.5,
+    fontWeight: '600',
+  },
+  techDnaMorePill: {
+    backgroundColor: 'rgba(255, 255, 255, 0.14)',
+    paddingHorizontal: 6,
+    paddingVertical: 3,
+    borderRadius: 6,
+  },
+  techDnaMoreText: {
     color: '#FFFFFF',
-    fontSize: 11,
+    fontSize: 10,
     fontWeight: '800',
   },
-  detailsButton: {
+
+  // Toque para Detalhes Compacto
+  cardDetailHintRow: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
-    backgroundColor: Colors.primary,
-    height: 44,
-    borderRadius: 22,
-    gap: 8,
-    shadowColor: Colors.primary,
-    shadowOffset: { width: 0, height: 3 },
-    shadowOpacity: 0.35,
-    shadowRadius: 6,
-    elevation: 3,
+    gap: 5,
+    paddingVertical: 3,
   },
-  detailsButtonText: {
-    color: '#FFFFFF',
-    fontSize: 13,
-    fontWeight: '800',
-    letterSpacing: 0.5,
+  cardDetailHintText: {
+    color: '#38BDF8',
+    fontSize: 10.5,
+    fontWeight: '600',
   },
-  floatingActionRow: {
+
+  // FATELINK ACTION DOCK (CÁPSULA UNIFICADA DE DECISÃO)
+  fatelinkDockContainer: {
     position: 'absolute',
-    bottom: 12,
     left: 0,
     right: 0,
+    alignItems: 'center',
+    justifyContent: 'center',
+    zIndex: 40,
+  },
+  fatelinkDock: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
-    gap: 22,
-    zIndex: 30,
+    backgroundColor: 'rgba(15, 23, 42, 0.94)',
+    borderRadius: 30,
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+    borderWidth: 1.5,
+    borderColor: 'rgba(255, 255, 255, 0.14)',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 6 },
+    shadowOpacity: 0.35,
+    shadowRadius: 12,
+    elevation: 8,
+    gap: 8,
+    maxWidth: 440,
+    alignSelf: 'center',
   },
-  actionBtnCircle: {
-    borderRadius: 34,
-    backgroundColor: '#FFFFFF',
+  fatelinkDockCompact: {
+    paddingHorizontal: 8,
+    paddingVertical: 5,
+    gap: 6,
+  },
+  dockActionBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 5,
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+    borderRadius: 18,
+    backgroundColor: 'rgba(239, 68, 68, 0.12)',
+    borderWidth: 1,
+    borderColor: 'rgba(239, 68, 68, 0.25)',
+  },
+  dockActionBtnCompact: {
+    paddingHorizontal: 8,
+    paddingVertical: 6,
+    borderRadius: 18,
+  },
+  dockIconBoxPass: {
+    width: 20,
+    height: 20,
     alignItems: 'center',
     justifyContent: 'center',
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.25,
-    shadowRadius: 8,
-    elevation: 5,
   },
-  passBtnCircle: {
-    width: 60,
-    height: 60,
-    borderWidth: 2,
-    borderColor: '#FCA5A5',
+  dockLabelPass: {
+    color: '#EF4444',
+    fontSize: 11.5,
+    fontWeight: '800',
   },
-  undoBtnCircle: {
-    width: 44,
-    height: 44,
-    backgroundColor: '#F1F5F9',
+  dockMiniBtn: {
+    alignItems: 'center',
+    justifyContent: 'center',
+    width: 32,
+    height: 32,
+    borderRadius: 16,
+    backgroundColor: 'rgba(255, 255, 255, 0.06)',
   },
-  likeBtnCircle: {
-    width: 60,
-    height: 60,
-    borderWidth: 2,
-    borderColor: '#6EE7B7',
+  dockDivider: {
+    width: 1,
+    height: 20,
+    backgroundColor: 'rgba(255, 255, 255, 0.12)',
+  },
+  dockInspectBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 5,
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+    borderRadius: 18,
+    backgroundColor: 'rgba(56, 189, 248, 0.12)',
+    borderWidth: 1,
+    borderColor: 'rgba(56, 189, 248, 0.25)',
+  },
+  dockInspectBtnCompact: {
+    paddingHorizontal: 8,
+    paddingVertical: 6,
+  },
+  dockInspectText: {
+    color: '#38BDF8',
+    fontSize: 11.5,
+    fontWeight: '800',
+  },
+  dockConnectBtn: {
+    borderRadius: 20,
+    overflow: 'hidden',
+  },
+  dockConnectGradient: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: 13,
+    paddingVertical: 7.5,
+    borderRadius: 20,
+    gap: 6,
+  },
+  dockConnectGradientCompact: {
+    paddingHorizontal: 10,
+    paddingVertical: 7,
+    gap: 4,
+  },
+  dockConnectText: {
+    color: '#FFFFFF',
+    fontSize: 12.5,
+    fontWeight: '900',
+    letterSpacing: 0.3,
   },
   emptyContainer: {
     flex: 1,
@@ -1290,6 +2239,12 @@ const styles = StyleSheet.create({
     gap: 5,
     borderWidth: 1,
     borderColor: 'rgba(16, 185, 129, 0.4)',
+  },
+  matchDot: {
+    width: 7,
+    height: 7,
+    borderRadius: 3.5,
+    backgroundColor: '#10B981',
   },
   listMatchBadgeText: {
     color: '#10B981',
@@ -1446,46 +2401,159 @@ const styles = StyleSheet.create({
   },
   matchModalOverlay: {
     flex: 1,
-    backgroundColor: 'rgba(15, 23, 42, 0.85)',
+    backgroundColor: 'rgba(9, 14, 23, 0.92)',
     alignItems: 'center',
     justifyContent: 'center',
-    padding: 24,
+    padding: 20,
   },
   matchModalCard: {
     width: '100%',
-    maxWidth: 360,
-    backgroundColor: '#1E293B',
-    borderRadius: 24,
-    padding: 24,
+    maxWidth: 390,
+    backgroundColor: '#131D31',
+    borderRadius: 28,
+    padding: 26,
     alignItems: 'center',
-    borderWidth: 1,
-    borderColor: 'rgba(16, 185, 129, 0.3)',
+    borderWidth: 1.5,
+    borderColor: 'rgba(16, 185, 129, 0.4)',
     shadowColor: '#10B981',
-    shadowOffset: { width: 0, height: 6 },
-    shadowOpacity: 0.25,
-    shadowRadius: 16,
+    shadowOffset: { width: 0, height: 8 },
+    shadowOpacity: 0.35,
+    shadowRadius: 24,
+    elevation: 10,
   },
-  matchModalIconCircle: {
-    width: 76,
-    height: 76,
-    borderRadius: 38,
+  nexusIconCircle: {
+    width: 66,
+    height: 66,
+    borderRadius: 33,
     backgroundColor: '#10B981',
     alignItems: 'center',
     justifyContent: 'center',
-    marginBottom: 16,
+    marginBottom: 12,
+    shadowColor: '#10B981',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.45,
+    shadowRadius: 12,
+    elevation: 5,
+  },
+  nexusPill: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: 'rgba(16, 185, 129, 0.15)',
+    paddingHorizontal: 12,
+    paddingVertical: 5,
+    borderRadius: 20,
+    gap: 6,
+    borderWidth: 1,
+    borderColor: 'rgba(16, 185, 129, 0.35)',
+    marginBottom: 8,
+  },
+  nexusPillText: {
+    color: '#10B981',
+    fontSize: 10,
+    fontWeight: '900',
+    letterSpacing: 0.8,
   },
   matchModalTitle: {
-    fontSize: 26,
+    fontSize: 24,
     fontWeight: '900',
     color: '#FFFFFF',
-    marginBottom: 8,
+    marginBottom: 6,
+    textAlign: 'center',
+    letterSpacing: -0.3,
   },
   matchModalSubtitle: {
     fontSize: 13,
     color: '#CBD5E1',
     textAlign: 'center',
     lineHeight: 18,
-    marginBottom: 20,
+    marginBottom: 16,
+    paddingHorizontal: 8,
+  },
+  matchDualAvatarSection: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-around',
+    width: '100%',
+    marginVertical: 12,
+  },
+  matchAvatarCol: {
+    alignItems: 'center',
+    flex: 1,
+  },
+  matchAvatarName: {
+    color: '#FFFFFF',
+    fontSize: 12,
+    fontWeight: '800',
+    marginTop: 6,
+    textAlign: 'center',
+    maxWidth: 110,
+  },
+  matchAvatarRole: {
+    color: '#94A3B8',
+    fontSize: 10,
+    fontWeight: '600',
+    marginTop: 2,
+  },
+  matchConnector: {
+    alignItems: 'center',
+    justifyContent: 'center',
+    width: 44,
+  },
+  matchConnectorLine: {
+    position: 'absolute',
+    height: 2,
+    left: 0,
+    right: 0,
+    backgroundColor: 'rgba(255, 255, 255, 0.15)',
+  },
+  matchNexusCircle: {
+    width: 38,
+    height: 38,
+    borderRadius: 19,
+    backgroundColor: '#10B981',
+    alignItems: 'center',
+    justifyContent: 'center',
+    shadowColor: '#10B981',
+    shadowOpacity: 0.5,
+    shadowRadius: 8,
+    elevation: 4,
+    zIndex: 2,
+  },
+  matchDetailsBox: {
+    backgroundColor: 'rgba(15, 23, 42, 0.75)',
+    borderRadius: 14,
+    paddingHorizontal: 14,
+    paddingVertical: 10,
+    width: '100%',
+    alignItems: 'center',
+    marginBottom: 16,
+    borderWidth: 1,
+    borderColor: '#334155',
+  },
+  matchDetailsLabel: {
+    color: '#94A3B8',
+    fontSize: 10,
+    fontWeight: '800',
+    letterSpacing: 0.8,
+    textTransform: 'uppercase',
+    marginBottom: 2,
+  },
+  matchDetailsCargo: {
+    color: '#FFFFFF',
+    fontSize: 14,
+    fontWeight: '800',
+    textAlign: 'center',
+    marginBottom: 4,
+  },
+  matchScoreRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 5,
+  },
+  matchScoreText: {
+    color: '#10B981',
+    fontSize: 12,
+    fontWeight: '700',
   },
   matchModalButtons: {
     width: '100%',
@@ -1507,11 +2575,187 @@ const styles = StyleSheet.create({
   },
   matchModalCloseBtn: {
     alignItems: 'center',
-    paddingVertical: 10,
+    paddingVertical: 8,
   },
   matchModalCloseBtnText: {
     color: '#94A3B8',
     fontSize: 13,
     fontWeight: '600',
+  },
+  sortBar: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: 14,
+    paddingVertical: 5,
+    backgroundColor: '#0F172A',
+    borderBottomWidth: 1,
+    borderBottomColor: '#1E293B',
+    maxWidth: 500,
+    alignSelf: 'center',
+    width: '100%',
+  },
+  sortBarLabel: {
+    fontSize: 11,
+    fontWeight: '700',
+    color: '#94A3B8',
+    textTransform: 'uppercase',
+    letterSpacing: 0.5,
+    marginRight: 6,
+  },
+  sortScrollContent: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+  },
+  sortPill: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: 10,
+    paddingVertical: 4,
+    borderRadius: 14,
+    backgroundColor: '#1E293B',
+    borderWidth: 1,
+    borderColor: '#334155',
+  },
+  sortPillActive: {
+    backgroundColor: Colors.primary,
+    borderColor: Colors.primary,
+  },
+  sortPillText: {
+    fontSize: 11,
+    fontWeight: '600',
+    color: '#94A3B8',
+  },
+  sortPillTextActive: {
+    color: '#FFFFFF',
+    fontWeight: '800',
+  },
+  activeFiltersSection: {
+    backgroundColor: '#1E293B',
+    paddingVertical: 8,
+    paddingHorizontal: 16,
+    borderBottomWidth: 1,
+    borderBottomColor: '#334155',
+  },
+  activeFiltersHeaderRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    marginBottom: 6,
+  },
+  activeCountBadgeRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+  },
+  activeFiltersHeaderCount: {
+    fontSize: 12,
+    fontWeight: '800',
+    color: Colors.primary,
+  },
+  activeResultCountDot: {
+    fontSize: 12,
+    color: '#64748B',
+  },
+  activeResultCountText: {
+    fontSize: 12,
+    fontWeight: '600',
+    color: '#CBD5E1',
+  },
+  clearAllBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: 8,
+    paddingVertical: 2,
+    borderRadius: 6,
+    backgroundColor: 'rgba(239, 68, 68, 0.12)',
+  },
+  clearAllBtnText: {
+    fontSize: 11,
+    fontWeight: '700',
+    color: '#EF4444',
+  },
+  activeChipsScrollContent: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    paddingVertical: 2,
+  },
+  activeFilterChip: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#334155',
+    paddingLeft: 10,
+    paddingRight: 6,
+    paddingVertical: 4,
+    borderRadius: 14,
+    borderWidth: 1,
+    borderColor: '#475569',
+    gap: 5,
+  },
+  activeFilterChipText: {
+    fontSize: 11,
+    fontWeight: '600',
+    color: '#F1F5F9',
+    maxWidth: 160,
+  },
+  activeFilterChipClose: {
+    padding: 1,
+  },
+  emptyFilterCircle: {
+    width: 68,
+    height: 68,
+    borderRadius: 34,
+    backgroundColor: 'rgba(217, 30, 24, 0.12)',
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginBottom: 12,
+  },
+  clearFiltersBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: Colors.primary,
+    paddingHorizontal: 18,
+    paddingVertical: 10,
+    borderRadius: 20,
+    marginTop: 16,
+    gap: 6,
+  },
+  clearFiltersBtnText: {
+    color: '#FFFFFF',
+    fontSize: 13,
+    fontWeight: '800',
+  },
+  activeFilterBanner: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    backgroundColor: 'rgba(217, 30, 24, 0.08)',
+    borderWidth: 1,
+    borderColor: 'rgba(217, 30, 24, 0.25)',
+    borderRadius: 10,
+    marginHorizontal: 16,
+    marginBottom: 10,
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+  },
+  activeFilterText: {
+    fontSize: 12,
+    color: Colors.primary,
+    fontWeight: '600',
+    flex: 1,
+  },
+  clearFilterBadge: {
+    backgroundColor: Colors.primary,
+    paddingHorizontal: 8,
+    paddingVertical: 3,
+    borderRadius: 6,
+    marginLeft: 8,
+  },
+  clearFilterBadgeText: {
+    color: '#FFFFFF',
+    fontSize: 11,
+    fontWeight: '700',
   },
 });

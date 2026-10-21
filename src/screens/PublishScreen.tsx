@@ -34,10 +34,28 @@ interface PublishScreenProps {
 const MODALIDADE_OPTIONS: Array<'Híbrido' | 'Remoto' | 'Presencial'> = ['Híbrido', 'Remoto', 'Presencial'];
 const TIPO_VAGA_OPTIONS: Array<'Estágio' | 'Trainee' | 'Júnior'> = ['Estágio', 'Trainee', 'Júnior'];
 const CURSOS_FATEC = [
-  'Análise e Desenv. de Sistemas',
-  'Desenv. de Software Multiplataforma',
-  'Gestão da TI',
-  'Logística',
+  'Análise e Desenvolvimento de Sistemas',
+  'Agronegócio',
+  'Gestão Empresarial (Presencial)',
+  'Gestão Empresarial (EaD)',
+  'Sistemas para Internet',
+];
+const SEMESTRES_FATEC = [
+  '1º Semestre',
+  '2º Semestre',
+  '3º Semestre',
+  '4º Semestre',
+  '5º Semestre',
+  '6º Semestre',
+];
+const CIDADES_REGIAO = [
+  'Jales - SP',
+  'Fernandópolis - SP',
+  'Santa Fé do Sul - SP',
+  'Votuporanga - SP',
+  'Urânia - SP',
+  'Palmeira d\'Oeste - SP',
+  'São José do Rio Preto - SP',
 ];
 const DISPONIBILIDADE_OPTIONS: Array<'Manhã' | 'Tarde' | 'Noite' | 'Integral'> = ['Manhã', 'Tarde', 'Noite', 'Integral'];
 
@@ -55,10 +73,11 @@ export const PublishScreen: React.FC<PublishScreenProps> = ({
   const [alunoNome, setAlunoNome] = useState(currentUser?.tipo === 'aluno' ? currentUser.nome : '');
   const [alunoTitle, setAlunoTitle] = useState('');
   const [alunoCourse, setAlunoCourse] = useState(
-    currentUser?.curso_ou_ramo || 'Análise e Desenv. de Sistemas'
+    currentUser?.curso_ou_ramo || 'Análise e Desenvolvimento de Sistemas'
   );
   const [alunoSemestre, setAlunoSemestre] = useState('4º Semestre');
-  const [alunoUnidade, setAlunoUnidade] = useState('Fatec Zona Leste');
+  const [alunoUnidade, setAlunoUnidade] = useState('Fatec Jales - Prof. José Camargo');
+  const [alunoLocalizacao, setAlunoLocalizacao] = useState('Jales - SP');
   const [alunoDisponibilidade, setAlunoDisponibilidade] = useState<'Manhã' | 'Tarde' | 'Noite' | 'Integral'>('Tarde');
   const [alunoSkills, setAlunoSkills] = useState('');
   const [alunoBio, setAlunoBio] = useState('');
@@ -70,8 +89,9 @@ export const PublishScreen: React.FC<PublishScreenProps> = ({
   // Estados Empresa (Vaga de Estágio / Oportunidade)
   const [empresaNome, setEmpresaNome] = useState(currentUser?.tipo === 'empresa' ? currentUser.nome : 'Softpar Tecnologia');
   const [empresaTitle, setEmpresaTitle] = useState('');
-  const [empresaArea, setEmpresaArea] = useState('Tecnologia da Informação');
-  const [empresaLocal, setEmpresaLocal] = useState('Jales - SP (Híbrido)');
+  const [empresaArea, setEmpresaArea] = useState('Tecnologia da Informação & Software');
+  const [empresaCurso, setEmpresaCurso] = useState('Análise e Desenvolvimento de Sistemas');
+  const [empresaLocal, setEmpresaLocal] = useState('Jales - SP');
   const [empresaModalidade, setEmpresaModalidade] = useState<'Híbrido' | 'Remoto' | 'Presencial'>('Híbrido');
   const [empresaTipo, setEmpresaTipo] = useState<'Estágio' | 'Trainee' | 'Júnior'>('Estágio');
   const [empresaBolsa, setEmpresaBolsa] = useState('R$ 2.100,00 / mês');
@@ -83,29 +103,31 @@ export const PublishScreen: React.FC<PublishScreenProps> = ({
   // Preenchimento de Exemplo com 1 Clique (Super prático para testes)
   const handleFillExample = () => {
     if (isAluno) {
-      setAlunoNome(currentUser?.nome || 'Gabriel Santos');
-      setAlunoTitle('Desenvolvedor Backend & Infraestrutura de TI Jr');
-      setAlunoCourse('Gestão da Tecnologia da Informação');
-      setAlunoSemestre('5º Semestre');
+      setAlunoNome(currentUser?.nome || 'Letícia Ribeiro Martins');
+      setAlunoTitle('Desenvolvedora Front-end & Mobile (React Native)');
+      setAlunoCourse('Análise e Desenvolvimento de Sistemas');
+      setAlunoSemestre('4º Semestre');
       setAlunoUnidade('Fatec Jales - Prof. José Camargo');
-      setAlunoDisponibilidade('Manhã');
-      setAlunoSkills('PostgreSQL, Node.js, Redes, Linux, React Native, Git');
+      setAlunoLocalizacao('Fernandópolis - SP');
+      setAlunoDisponibilidade('Tarde');
+      setAlunoSkills('React Native, TypeScript, Node.js, PostgreSQL, UI/UX, Git');
       setAlunoBio(
-        'Estudante de GTI na Fatec Jales com paixão por arquitetura de software, servidores Linux e bancos de dados relacionais. Busco oportunidade na região de Jales e Rio Preto.'
+        'Estudante de ADS na Fatec Jales, resido em Fernandópolis e busco oportunidade de estágio na região de Jales, Fernandópolis, Votuporanga ou Rio Preto.'
       );
-      setAlunoGithub('github.com/gabrielsantos-fatec');
-      setAlunoLinkedin('linkedin.com/in/gabrielsantos-ti');
-      setAlunoPhoto(currentUser?.imagemUrl || 'https://images.unsplash.com/photo-1519085360753-af0119f7cbe7?auto=format&fit=crop&w=800&q=80');
+      setAlunoGithub('github.com/leticiamartins-fatec');
+      setAlunoLinkedin('linkedin.com/in/leticiaribeiro-fatec');
+      setAlunoPhoto(currentUser?.imagemUrl || 'https://images.unsplash.com/photo-1573496359142-b8d87734a5a2?auto=format&fit=crop&w=800&q=80');
       setCvUploaded(true);
     } else {
       setEmpresaNome(currentUser?.nome || 'Softpar Tecnologia');
       setEmpresaTitle('Estágio em Desenvolvimento de Software & SQL');
-      setEmpresaArea('Tecnologia / Automação Comercial');
-      setEmpresaLocal('Jales - SP (Híbrido)');
+      setEmpresaArea('Tecnologia da Informação & Software');
+      setEmpresaCurso('Análise e Desenvolvimento de Sistemas');
+      setEmpresaLocal('Jales - SP');
       setEmpresaModalidade('Híbrido');
       setEmpresaTipo('Estágio');
       setEmpresaBolsa('R$ 2.100,00 / mês');
-      setEmpresaReqs('Estar cursando FATEC Jales (ADS ou GTI), lógica de programação, vontade de aprender');
+      setEmpresaReqs('Estar cursando FATEC Jales (ADS ou Sistemas para Internet), lógica de programação, vontade de aprender');
       setEmpresaBeneficios('Bolsa-Auxílio de R$ 2.100, Vale Refeição (R$ 650/mês), Vale Transporte, Bônus');
       setEmpresaDesc(
         'Buscamos estudantes talentosos da Fatec Jales para atuar no desenvolvimento de módulos e integrações de microsserviços com PostgreSQL e Node.js em nossa sede regional.'
@@ -135,11 +157,13 @@ export const PublishScreen: React.FC<PublishScreenProps> = ({
 
       setIsSubmitting(true);
       const newCandidatePayload: Partial<Candidate> = {
+        usuarioId: currentUser?.id,
         nome: alunoNome.trim(),
         idade: 21,
         curso: alunoCourse,
         semestre: alunoSemestre,
         unidadeFatec: alunoUnidade,
+        localizacao: alunoLocalizacao.trim() || 'Jales - SP',
         sobre: alunoBio.trim(),
         competencias: alunoSkills
           ? alunoSkills.split(',').map((s) => s.trim()).filter(Boolean)
@@ -178,12 +202,13 @@ export const PublishScreen: React.FC<PublishScreenProps> = ({
 
       setIsSubmitting(true);
       const newOpportunityPayload: Partial<Opportunity> = {
+        empresaId: currentUser?.id,
         empresa: empresaNome.trim() || 'Empresa Parceira FATEC',
         nomeFantasia: empresaNome.trim() || 'Tech Partner',
         cargo: empresaTitle.trim(),
-        area: empresaArea.trim() || 'Tecnologia da Informação',
-        cursoRelacionado: 'Cursos de TI / FATEC',
-        localizacao: empresaLocal.trim() || 'São Paulo - SP',
+        area: empresaArea.trim() || 'Tecnologia da Informação & Software',
+        cursoRelacionado: empresaCurso,
+        localizacao: empresaLocal.trim() || 'Jales - SP',
         modalidade: empresaModalidade,
         tipo: empresaTipo,
         bolsa: empresaBolsa.trim(),
@@ -341,26 +366,73 @@ export const PublishScreen: React.FC<PublishScreenProps> = ({
                 </View>
               </View>
 
+              {/* Seletor de Semestre */}
+              <View style={styles.inputGroup}>
+                <Text style={styles.inputLabel}>Semestre Atual</Text>
+                <View style={styles.pillsRow}>
+                  {SEMESTRES_FATEC.map((s) => (
+                    <TouchableOpacity
+                      key={s}
+                      style={[styles.pillOption, alunoSemestre === s && styles.pillOptionActive]}
+                      onPress={() => setAlunoSemestre(s)}
+                      activeOpacity={0.7}
+                    >
+                      <Text
+                        style={[
+                          styles.pillOptionText,
+                          alunoSemestre === s && styles.pillOptionTextActive,
+                        ]}
+                      >
+                        {s}
+                      </Text>
+                    </TouchableOpacity>
+                  ))}
+                </View>
+              </View>
+
               <View style={styles.inputRow}>
                 <View style={[styles.inputGroup, { flex: 1 }]}>
-                  <Text style={styles.inputLabel}>Semestre</Text>
+                  <Text style={styles.inputLabel}>Cidade de Residência</Text>
                   <TextInput
                     style={styles.textInput}
-                    placeholder="Ex: 4º Semestre"
+                    placeholder="Ex: Fernandópolis - SP"
                     placeholderTextColor={Colors.placeholder}
-                    value={alunoSemestre}
-                    onChangeText={setAlunoSemestre}
+                    value={alunoLocalizacao}
+                    onChangeText={setAlunoLocalizacao}
                   />
                 </View>
                 <View style={[styles.inputGroup, { flex: 1 }]}>
                   <Text style={styles.inputLabel}>Unidade Fatec</Text>
                   <TextInput
                     style={styles.textInput}
-                    placeholder="Ex: Fatec Zona Leste"
+                    placeholder="Ex: Fatec Jales"
                     placeholderTextColor={Colors.placeholder}
                     value={alunoUnidade}
                     onChangeText={setAlunoUnidade}
                   />
+                </View>
+              </View>
+
+              <View style={styles.inputGroup}>
+                <Text style={[styles.inputLabel, { fontSize: 12, color: Colors.textMuted }]}>Cidades com transporte regional diário para Fatec Jales:</Text>
+                <View style={styles.pillsRow}>
+                  {CIDADES_REGIAO.map((c) => (
+                    <TouchableOpacity
+                      key={c}
+                      style={[styles.pillOption, alunoLocalizacao === c && styles.pillOptionActive]}
+                      onPress={() => setAlunoLocalizacao(c)}
+                      activeOpacity={0.7}
+                    >
+                      <Text
+                        style={[
+                          styles.pillOptionText,
+                          alunoLocalizacao === c && styles.pillOptionTextActive,
+                        ]}
+                      >
+                        {c.replace(' - SP', '')}
+                      </Text>
+                    </TouchableOpacity>
+                  ))}
                 </View>
               </View>
 
@@ -490,15 +562,58 @@ export const PublishScreen: React.FC<PublishScreenProps> = ({
                 </View>
               </View>
 
+              {/* Seletor de Curso FATEC Alvo */}
               <View style={styles.inputGroup}>
-                <Text style={styles.inputLabel}>Localização</Text>
+                <Text style={styles.inputLabel}>Curso FATEC Alvo / Prioritário</Text>
+                <View style={styles.pillsRow}>
+                  {CURSOS_FATEC.map((c) => (
+                    <TouchableOpacity
+                      key={c}
+                      style={[styles.pillOption, empresaCurso === c && styles.pillOptionActive]}
+                      onPress={() => setEmpresaCurso(c)}
+                      activeOpacity={0.7}
+                    >
+                      <Text
+                        style={[
+                          styles.pillOptionText,
+                          empresaCurso === c && styles.pillOptionTextActive,
+                        ]}
+                      >
+                        {c}
+                      </Text>
+                    </TouchableOpacity>
+                  ))}
+                </View>
+              </View>
+
+              <View style={styles.inputGroup}>
+                <Text style={styles.inputLabel}>Localização da Vaga / Empresa</Text>
                 <TextInput
                   style={styles.textInput}
-                  placeholder="Ex: São Paulo - SP (Zona Leste / Metrô)"
+                  placeholder="Ex: Jales - SP ou Fernandópolis - SP"
                   placeholderTextColor={Colors.placeholder}
                   value={empresaLocal}
                   onChangeText={setEmpresaLocal}
                 />
+                <View style={[styles.pillsRow, { marginTop: 6 }]}>
+                  {CIDADES_REGIAO.map((c) => (
+                    <TouchableOpacity
+                      key={c}
+                      style={[styles.pillOption, empresaLocal === c && styles.pillOptionActive]}
+                      onPress={() => setEmpresaLocal(c)}
+                      activeOpacity={0.7}
+                    >
+                      <Text
+                        style={[
+                          styles.pillOptionText,
+                          empresaLocal === c && styles.pillOptionTextActive,
+                        ]}
+                      >
+                        {c.replace(' - SP', '')}
+                      </Text>
+                    </TouchableOpacity>
+                  ))}
+                </View>
               </View>
 
               {/* Seletor de Modalidade */}
@@ -618,6 +733,9 @@ const styles = StyleSheet.create({
   container: {
     padding: 16,
     paddingBottom: 40,
+    maxWidth: 720,
+    width: '100%',
+    alignSelf: 'center',
   },
   header: {
     marginBottom: 16,

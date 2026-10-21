@@ -18,7 +18,7 @@ import { api } from '../services/api';
 interface MatchScreenProps {
   role: UserRole;
   currentUserId?: number;
-  onStartChat: (name: string, roleInfo: string) => void;
+  onStartChat: (name: string, roleInfo: string, targetUserId?: number, vagaId?: number) => void;
   onNavigateToFeed?: () => void;
 }
 
@@ -69,21 +69,23 @@ export const MatchScreen: React.FC<MatchScreenProps> = ({
 
   return (
     <View style={styles.container}>
-      {/* Header da Aba Match */}
+      {/* Header da Aba Conexões & Elos */}
       <View style={styles.header}>
-        <View style={styles.headerTitleRow}>
-          <Ionicons name="flame" size={24} color="#EF4444" />
-          <Text style={styles.title}>Matches Mútuos</Text>
-        </View>
-        <Text style={styles.subtitle}>
-          {isAluno
-            ? 'Empresas parceiras que deram match ou demonstraram interesse no seu perfil FATEC.'
-            : 'Estudantes FATEC com interesse mútuo confirmado nas suas oportunidades.'}
-        </Text>
-        <View style={styles.countPill}>
-          <Text style={styles.countText}>
-            {matches.length} {matches.length === 1 ? 'conexão ativa' : 'conexões ativas'}
+        <View style={styles.headerInner}>
+          <View style={styles.headerTitleRow}>
+            <Ionicons name="git-network" size={24} color={Colors.primary} />
+            <Text style={styles.title}>Elos & Conexões Estabelecidas</Text>
+          </View>
+          <Text style={styles.subtitle}>
+            {isAluno
+              ? 'Empresas parceiras e oportunidades com afinidade mútua confirmada no seu perfil FATEC.'
+              : 'Estudantes FATEC com afinidade bilateral confirmada nas suas oportunidades.'}
           </Text>
+          <View style={styles.countPill}>
+            <Text style={styles.countText}>
+              {matches.length} {matches.length === 1 ? 'elo ativo' : 'elos ativos'}
+            </Text>
+          </View>
         </View>
       </View>
 
@@ -103,13 +105,13 @@ export const MatchScreen: React.FC<MatchScreenProps> = ({
         {matches.length === 0 ? (
           <View style={styles.emptyContainer}>
             <View style={styles.emptyIconCircle}>
-              <Ionicons name="heart-dislike-outline" size={44} color={Colors.placeholder} />
+              <Ionicons name="git-network-outline" size={44} color={Colors.placeholder} />
             </View>
-            <Text style={styles.emptyTitle}>Nenhum Match Mútuo Ainda</Text>
+            <Text style={styles.emptyTitle}>Nenhum Elo Estabelecido Ainda</Text>
             <Text style={styles.emptySubtitle}>
               {isAluno
-                ? 'Continue explorando as vagas no Feed e dando ❤️ nas que você tem interesse. Quando a empresa também curtir seu perfil, o match aparecerá aqui instantaneamente!'
-                : 'Explore os talentos da FATEC no Feed e envie curtidas. Quando o estudante também demonstrar afinidade, a conexão mútua será listada aqui.'}
+                ? 'Explore as oportunidades no Feed e toque em Conectar naquelas que combinam com seu momento acadêmico. Quando houver afinidade recíproca com a empresa, o elo será ativado instantaneamente aqui!'
+                : 'Explore os talentos da FATEC no Feed e estabeleça conexões. Quando o estudante confirmar a afinidade, o elo profissional será ativado com canal direto de diálogo.'}
             </Text>
             {onNavigateToFeed && (
               <TouchableOpacity
@@ -197,7 +199,10 @@ export const MatchScreen: React.FC<MatchScreenProps> = ({
 
                     <TouchableOpacity
                       style={styles.chatBtn}
-                      onPress={() => onStartChat(displayName || 'Contato', subTitle || 'Match')}
+                      onPress={() => {
+                        const targetId = isAluno ? item.empresaId : item.alunoId;
+                        onStartChat(displayName || 'Contato', subTitle || 'Match', targetId, item.vagaId);
+                      }}
                       activeOpacity={0.85}
                     >
                       <Ionicons name="chatbubbles" size={16} color="#FFFFFF" />
@@ -286,9 +291,12 @@ export const MatchScreen: React.FC<MatchScreenProps> = ({
                   onPress={() => {
                     const matchItem = selectedMatch;
                     setSelectedMatch(null);
+                    const targetId = isAluno ? matchItem.empresaId : matchItem.alunoId;
                     onStartChat(
                       isAluno ? matchItem.empresaNome || 'Empresa' : matchItem.alunoNome || 'Estudante',
-                      isAluno ? matchItem.cargo || 'Vaga' : matchItem.curso || 'FATEC'
+                      isAluno ? matchItem.cargo || 'Vaga' : matchItem.curso || 'FATEC',
+                      targetId,
+                      matchItem.vagaId
                     );
                   }}
                   activeOpacity={0.85}
@@ -329,6 +337,11 @@ const styles = StyleSheet.create({
     borderBottomWidth: 1,
     borderBottomColor: '#F1F5F9',
   },
+  headerInner: {
+    maxWidth: 800,
+    width: '100%',
+    alignSelf: 'center',
+  },
   headerTitleRow: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -363,6 +376,9 @@ const styles = StyleSheet.create({
   content: {
     padding: 16,
     paddingBottom: 30,
+    maxWidth: 800,
+    width: '100%',
+    alignSelf: 'center',
   },
   emptyContainer: {
     alignItems: 'center',

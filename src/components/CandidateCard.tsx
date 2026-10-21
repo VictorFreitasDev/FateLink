@@ -4,6 +4,8 @@ import { Ionicons } from '@expo/vector-icons';
 import { Colors } from '../theme/colors';
 import { Candidate } from '../types';
 
+const FALLBACK_CAND_IMG = 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=800&auto=format&fit=crop&q=80';
+
 interface CandidateCardProps {
   candidate: Candidate;
   onPropose: () => void;
@@ -17,11 +19,22 @@ export const CandidateCard: React.FC<CandidateCardProps> = ({
   onDislike,
   onPressDetails,
 }) => {
+  const [imageUri, setImageUri] = React.useState(candidate.imagemUrl || FALLBACK_CAND_IMG);
+
+  React.useEffect(() => {
+    setImageUri(candidate.imagemUrl || FALLBACK_CAND_IMG);
+  }, [candidate.imagemUrl]);
+
   return (
     <View style={styles.cardContainer}>
       {/* Imagem / Foto do Candidato */}
       <View style={styles.imageContainer}>
-        <Image source={{ uri: candidate.imagemUrl }} style={styles.image} resizeMode="cover" />
+        <Image
+          source={{ uri: imageUri }}
+          style={styles.image}
+          resizeMode="cover"
+          onError={() => setImageUri(FALLBACK_CAND_IMG)}
+        />
         <View style={styles.gradientOverlay} />
 
         {/* Tag de Match / Compatibilidade */}

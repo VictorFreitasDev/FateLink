@@ -1,8 +1,10 @@
 import React from 'react';
-import { View, Text, Modal, ScrollView, Image, TouchableOpacity, StyleSheet, Dimensions } from 'react-native';
+import { View, Text, Modal, ScrollView, Image, TouchableOpacity, StyleSheet, Dimensions, Platform, Linking } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { Colors } from '../theme/colors';
 import { Opportunity, Candidate } from '../types';
+import { MatchBreakdownCard } from './MatchBreakdownCard';
+import { api } from '../services/api';
 
 interface ModalDetailsProps {
   visible: boolean;
@@ -26,6 +28,16 @@ export const ModalDetails: React.FC<ModalDetailsProps> = ({
   if (!opportunity && !candidate) return null;
 
   const isOpportunity = !!opportunity;
+
+  const handleOpenUrl = (url?: string | null) => {
+    if (!url) return;
+    const fullUrl = api.getResumeUrl(url) || url;
+    if (Platform.OS === 'web' && typeof window !== 'undefined') {
+      window.open(fullUrl, '_blank');
+    } else {
+      Linking.openURL(fullUrl).catch((err) => console.warn('Erro ao abrir link:', err));
+    }
+  };
 
   return (
     <Modal visible={visible} animationType="slide" transparent onRequestClose={onClose}>
@@ -72,21 +84,20 @@ export const ModalDetails: React.FC<ModalDetailsProps> = ({
                   </View>
                 </View>
 
-                {/* Diagnóstico do Match Real com Justificativas */}
-                {opportunity.matchExplanations && opportunity.matchExplanations.length > 0 && (
-                  <View style={styles.matchExplBox}>
-                    <View style={styles.matchExplHeader}>
-                      <Ionicons name="sparkles" size={16} color={Colors.primary} />
-                      <Text style={styles.matchExplTitle}>Diagnóstico de Afinidade FATEC ({opportunity.matchScore}%)</Text>
-                    </View>
-                    {opportunity.matchExplanations.map((exp, idx) => (
-                      <View key={idx} style={styles.matchExplRow}>
-                        <Ionicons name="checkmark-circle" size={14} color={Colors.like} style={{ marginTop: 2 }} />
-                        <Text style={styles.matchExplText}>{exp}</Text>
-                      </View>
-                    ))}
-                  </View>
-                )}
+                {/* Diagnóstico do Match Real Explicável */}
+                <MatchBreakdownCard
+                  score={opportunity.matchScore || 85}
+                  nivel={opportunity.matchLevel}
+                  breakdown={opportunity.matchBreakdown}
+                  matchedSkills={opportunity.matchedSkills}
+                  missingSkills={opportunity.missingSkills}
+                  strengths={opportunity.strengths}
+                  improvements={opportunity.improvements}
+                  explanations={opportunity.matchExplanations}
+                  isBlocked={opportunity.isBlocked}
+                  blockReasons={opportunity.blockReasons}
+                  initialExpanded={false}
+                />
 
                 {/* Descrição */}
                 <View style={styles.sectionBlock}>
@@ -127,17 +138,58 @@ export const ModalDetails: React.FC<ModalDetailsProps> = ({
                   <Text style={styles.companySub}>{candidate.curso} • {candidate.semestre}</Text>
                 </View>
 
-                {/* Métricas rápidas */}
+                {/* Métricas rápidas da formação e jornada */}
                 <View style={styles.metricsRow}>
                   <View style={styles.metricCard}>
                     <Text style={styles.metricLabel}>Disponibilidade</Text>
                     <Text style={styles.metricValue}>{candidate.disponibilidade}</Text>
                   </View>
                   <View style={styles.metricCard}>
-                    <Text style={styles.metricLabel}>Match Fatec</Text>
-                    <Text style={[styles.metricValue, { color: Colors.primary }]}>{candidate.matchScore}%</Text>
+                    <Text style={styles.metricLabel}>Modalidade</Text>
+                    <Text style={styles.metricValue}>{candidate.modalidadeDesejada || 'Híbrido'}</Text>
+                  </View>
+                  <View style={styles.metricCard}>
+                    <Text style={styles.metricLabel}>Formatura</Text>
+                    <Text style={styles.metricValue}>{candidate.previsaoFormacao || 'Dez/2026'}</Text>
+                  </View>
+                  <View style={styles.metricCard}>
+                    <Text style={styles.metricLabel}>Localização</Text>
+                    <Text style={styles.metricValue} numberOfLines={1}>{candidate.localizacao || candidate.unidadeFatec}</Text>
                   </View>
                 </View>
+
+                {/* Banner de Currículo Oficial em PDF (se houver) */}
+                {candidate.curriculoUrl ? (
+                  <TouchableOpacity
+                    style={styles.pdfDownloadBanner}
+                    onPress={() => handleOpenUrl(candidate.curriculoUrl)}
+                    activeOpacity={0.8}
+                  >
+                    <View style={styles.pdfBannerIcon}>
+                      <Ionicons name="document-text" size={24} color="#EF4444" />
+                    </View>
+                    <View style={{ flex: 1 }}>
+                      <Text style={styles.pdfBannerTitle}>Currículo em PDF Disponível</Text>
+                      <Text style={styles.pdfBannerSub}>Toque para visualizar ou baixar o documento oficial do aluno</Text>
+                    </View>
+                    <Ionicons name="open-outline" size={18} color={Colors.primary} />
+                  </TouchableOpacity>
+                ) : null}
+
+                {/* Diagnóstico do Match Real Explicável */}
+                <MatchBreakdownCard
+                  score={candidate.matchScore || 90}
+                  nivel={candidate.matchLevel}
+                  breakdown={candidate.matchBreakdown}
+                  matchedSkills={candidate.matchedSkills}
+                  missingSkills={candidate.missingSkills}
+                  strengths={candidate.strengths}
+                  improvements={candidate.improvements}
+                  explanations={candidate.matchExplanations}
+                  isBlocked={candidate.isBlocked}
+                  blockReasons={candidate.blockReasons}
+                  initialExpanded={false}
+                />
 
                 {/* Biografia / Sobre */}
                 <View style={styles.sectionBlock}>
@@ -157,6 +209,57 @@ export const ModalDetails: React.FC<ModalDetailsProps> = ({
                   </View>
                 </View>
 
+                {/* Projetos em Cards Profissionais */}
+                {Array.isArray(candidate.projetos) && candidate.projetos.length > 0 && (
+                  <View style={styles.sectionBlock}>
+                    <Text style={styles.sectionTitle}>Projetos Relevantes ({candidate.projetos.length})</Text>
+                    <View style={{ gap: 12, marginTop: 4 }}>
+                      {candidate.projetos.map((proj, i) => (
+                        <View key={i} style={styles.projectProCard}>
+                          {proj.imagemUrl ? (
+                            <Image source={{ uri: proj.imagemUrl }} style={styles.projectProImage} resizeMode="cover" />
+                          ) : null}
+                          <View style={styles.projectProBody}>
+                            <Text style={styles.projectProTitle}>{proj.titulo}</Text>
+                            <Text style={styles.projectProDesc}>{proj.descricao}</Text>
+
+                            {proj.tecnologias && proj.tecnologias.length > 0 && (
+                              <View style={styles.projectProTechs}>
+                                {proj.tecnologias.map((tech, tIdx) => (
+                                  <View key={tIdx} style={styles.projectProTechBadge}>
+                                    <Text style={styles.projectProTechText}>{tech}</Text>
+                                  </View>
+                                ))}
+                              </View>
+                            )}
+
+                            <View style={styles.projectProLinksRow}>
+                              {proj.githubUrl ? (
+                                <TouchableOpacity
+                                  style={styles.projectProLinkBtn}
+                                  onPress={() => handleOpenUrl(proj.githubUrl)}
+                                >
+                                  <Ionicons name="logo-github" size={13} color="#FFFFFF" />
+                                  <Text style={styles.projectProLinkText}>Repositório</Text>
+                                </TouchableOpacity>
+                              ) : null}
+                              {proj.demoUrl ? (
+                                <TouchableOpacity
+                                  style={[styles.projectProLinkBtn, { backgroundColor: Colors.primary }]}
+                                  onPress={() => handleOpenUrl(proj.demoUrl)}
+                                >
+                                  <Ionicons name="globe-outline" size={13} color="#FFFFFF" />
+                                  <Text style={styles.projectProLinkText}>Demo ao Vivo</Text>
+                                </TouchableOpacity>
+                              ) : null}
+                            </View>
+                          </View>
+                        </View>
+                      ))}
+                    </View>
+                  </View>
+                )}
+
                 {/* Experiências Profissionais */}
                 {Array.isArray(candidate.experiencias) && candidate.experiencias.length > 0 && (
                   <View style={styles.sectionBlock}>
@@ -169,22 +272,6 @@ export const ModalDetails: React.FC<ModalDetailsProps> = ({
                         </View>
                         <Text style={styles.itemSubtitle}>{exp.empresa}</Text>
                         {exp.descricao ? <Text style={styles.itemDesc}>{exp.descricao}</Text> : null}
-                      </View>
-                    ))}
-                  </View>
-                )}
-
-                {/* Projetos em Destaque */}
-                {Array.isArray(candidate.projetos) && candidate.projetos.length > 0 && (
-                  <View style={styles.sectionBlock}>
-                    <Text style={styles.sectionTitle}>Projetos Relevantes</Text>
-                    {candidate.projetos.map((proj, i) => (
-                      <View key={i} style={styles.itemCard}>
-                        <Text style={styles.itemTitle}>{proj.titulo}</Text>
-                        <Text style={styles.itemDesc}>{proj.descricao}</Text>
-                        {proj.link ? (
-                          <Text style={styles.itemLink}>🔗 {proj.link}</Text>
-                        ) : null}
                       </View>
                     ))}
                   </View>
@@ -203,21 +290,27 @@ export const ModalDetails: React.FC<ModalDetailsProps> = ({
                   </View>
                 )}
 
-                {/* Links */}
-                {(candidate.github || candidate.linkedin) && (
+                {/* Links Profissionais */}
+                {(candidate.github || candidate.linkedin || candidate.portfolio) && (
                   <View style={styles.sectionBlock}>
                     <Text style={styles.sectionTitle}>Links Profissionais</Text>
                     {candidate.github && (
-                      <View style={styles.linkRow}>
+                      <TouchableOpacity style={styles.linkRow} onPress={() => handleOpenUrl(candidate.github)}>
                         <Ionicons name="logo-github" size={18} color={Colors.textPrimary} />
                         <Text style={styles.linkText}>{candidate.github}</Text>
-                      </View>
+                      </TouchableOpacity>
                     )}
                     {candidate.linkedin && (
-                      <View style={styles.linkRow}>
+                      <TouchableOpacity style={styles.linkRow} onPress={() => handleOpenUrl(candidate.linkedin)}>
                         <Ionicons name="logo-linkedin" size={18} color="#0A66C2" />
                         <Text style={styles.linkText}>{candidate.linkedin}</Text>
-                      </View>
+                      </TouchableOpacity>
+                    )}
+                    {candidate.portfolio && (
+                      <TouchableOpacity style={styles.linkRow} onPress={() => handleOpenUrl(candidate.portfolio)}>
+                        <Ionicons name="globe-outline" size={18} color="#10B981" />
+                        <Text style={styles.linkText}>{candidate.portfolio}</Text>
+                      </TouchableOpacity>
                     )}
                   </View>
                 )}
@@ -458,6 +551,98 @@ const styles = StyleSheet.create({
     color: Colors.primary,
     fontWeight: '600',
     marginTop: 4,
+  },
+  pdfDownloadBanner: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+    backgroundColor: '#FEF2F2',
+    borderWidth: 1,
+    borderColor: '#FECACA',
+    borderRadius: 14,
+    padding: 14,
+    marginBottom: 20,
+  },
+  pdfBannerIcon: {
+    width: 42,
+    height: 42,
+    borderRadius: 21,
+    backgroundColor: '#FEE2E2',
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  pdfBannerTitle: {
+    fontSize: 14,
+    fontWeight: '700',
+    color: '#991B1B',
+  },
+  pdfBannerSub: {
+    fontSize: 12,
+    color: '#7F1D1D',
+    marginTop: 2,
+  },
+  projectProCard: {
+    backgroundColor: Colors.inputBg,
+    borderRadius: 12,
+    overflow: 'hidden',
+    borderWidth: 1,
+    borderColor: Colors.divider,
+  },
+  projectProImage: {
+    width: '100%',
+    height: 140,
+    backgroundColor: '#E2E8F0',
+  },
+  projectProBody: {
+    padding: 14,
+  },
+  projectProTitle: {
+    fontSize: 15,
+    fontWeight: '700',
+    color: Colors.textPrimary,
+    marginBottom: 4,
+  },
+  projectProDesc: {
+    fontSize: 13,
+    color: Colors.textSecondary,
+    lineHeight: 18,
+    marginBottom: 10,
+  },
+  projectProTechs: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 6,
+    marginBottom: 12,
+  },
+  projectProTechBadge: {
+    backgroundColor: Colors.primaryLight,
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+    borderRadius: 6,
+  },
+  projectProTechText: {
+    fontSize: 11,
+    fontWeight: '700',
+    color: Colors.primaryDark,
+  },
+  projectProLinksRow: {
+    flexDirection: 'row',
+    gap: 8,
+    flexWrap: 'wrap',
+  },
+  projectProLinkBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    backgroundColor: '#0F172A',
+    paddingHorizontal: 12,
+    paddingVertical: 7,
+    borderRadius: 8,
+  },
+  projectProLinkText: {
+    color: '#FFFFFF',
+    fontSize: 12,
+    fontWeight: '700',
   },
   footerAction: {
     padding: 16,

@@ -15,13 +15,15 @@ UPDATE usuarios SET imagem_url = 'https://images.unsplash.com/photo-150064876779
 UPDATE usuarios SET imagem_url = 'https://images.unsplash.com/photo-1542744173-8e7e53415bb0?auto=format&fit=crop&w=800&q=80' WHERE id = 8;
 UPDATE usuarios SET imagem_url = 'https://images.unsplash.com/photo-1539571696357-5a69c17a67c6?auto=format&fit=crop&w=800&q=80' WHERE id = 9;
 
--- 3. Inserir Alunos da Fatec Jales (Área de TI) se não existirem
+-- 3. Inserir Alunos da Fatec Jales (Cursos Oficiais) se não existirem
 INSERT INTO usuarios (tipo, nome, email, documento, senha, curso_ou_ramo, imagem_url)
 VALUES
-('aluno', 'Gabriel Santos', 'gabriel.santos@fatec.sp.gov.br', '458.219.740-11', '123456', 'Gestão da Tecnologia da Informação', 'https://images.unsplash.com/photo-1519085360753-af0119f7cbe7?auto=format&fit=crop&w=800&q=80'),
+('aluno', 'Gabriel Santos', 'gabriel.santos@fatec.sp.gov.br', '458.219.740-11', '123456', 'Sistemas para Internet', 'https://images.unsplash.com/photo-1519085360753-af0119f7cbe7?auto=format&fit=crop&w=800&q=80'),
 ('aluno', 'Letícia Ribeiro Martins', 'leticia.martins@fatec.sp.gov.br', '394.812.560-88', '123456', 'Análise e Desenvolvimento de Sistemas', 'https://images.unsplash.com/photo-1573496359142-b8d87734a5a2?auto=format&fit=crop&w=800&q=80'),
 ('aluno', 'Matheus Oliveira Costa', 'matheus.costa@fatec.sp.gov.br', '481.930.220-45', '123456', 'Análise e Desenvolvimento de Sistemas', 'https://images.unsplash.com/photo-1506794778202-cad84cf45f1d?auto=format&fit=crop&w=800&q=80'),
-('aluno', 'Camila Ferreira Lima', 'camila.ferreira@fatec.sp.gov.br', '412.339.870-90', '123456', 'Gestão da Tecnologia da Informação', 'https://images.unsplash.com/photo-1580489944761-15a19d654956?auto=format&fit=crop&w=800&q=80')
+('aluno', 'Camila Ferreira Lima', 'camila.ferreira@fatec.sp.gov.br', '412.339.870-90', '123456', 'Gestão Empresarial (EaD)', 'https://images.unsplash.com/photo-1580489944761-15a19d654956?auto=format&fit=crop&w=800&q=80'),
+('aluno', 'Lucas Prado', 'lucas.prado@fatec.sp.gov.br', '472.109.830-22', '123456', 'Agronegócio', 'https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?auto=format&fit=crop&w=800&q=80'),
+('aluno', 'Camila Rocha', 'camila.rocha@fatec.sp.gov.br', '382.910.450-33', '123456', 'Gestão Empresarial (Presencial)', 'https://images.unsplash.com/photo-1573496359142-b8d87734a5a2?auto=format&fit=crop&w=800&q=80')
 ON CONFLICT (email) DO UPDATE SET
   nome = EXCLUDED.nome,
   documento = EXCLUDED.documento,
@@ -45,41 +47,59 @@ ON CONFLICT (email) DO UPDATE SET
   imagem_url = EXCLUDED.imagem_url;
 
 -- 5. Perfis Detalhados dos Candidatos da FATEC JALES
-INSERT INTO candidatos (usuario_id, nome, idade, curso, semestre, unidade_fatec, sobre, competencias, disponibilidade, imagem_url, github, linkedin, match_score)
-SELECT u.id, 'Gabriel Santos', 22, 'Gestão da Tecnologia da Informação', '5º Semestre', 'Fatec Jales - Prof. José Camargo',
-       'Estudante do 5º semestre de GTI na Fatec Jales. Experiência prática em infraestrutura, redes corporativas e suporte a sistemas. Busco estágio na região de Jales e Rio Preto.',
-       ARRAY['Governança de TI', 'Redes de Computadores', 'Linux', 'AWS Cloud', 'Suporte Técnico', 'ITIL'],
+INSERT INTO candidatos (usuario_id, nome, idade, curso, semestre, unidade_fatec, localizacao, sobre, competencias, disponibilidade, imagem_url, github, linkedin, match_score)
+SELECT u.id, 'Gabriel Santos', 22, 'Sistemas para Internet', '5º Semestre', 'Fatec Jales - Prof. José Camargo', 'Fernandópolis - SP',
+       'Estudante do 5º semestre de Sistemas para Internet na Fatec Jales, residente em Fernandópolis. Experiência prática em infraestrutura, redes corporativas e suporte a sistemas. Busco estágio na região de Jales e Rio Preto.',
+       ARRAY['Sistemas Web', 'Redes de Computadores', 'Linux', 'AWS Cloud', 'Node.js', 'Suporte Técnico'],
        'Manhã', 'https://images.unsplash.com/photo-1519085360753-af0119f7cbe7?auto=format&fit=crop&w=800&q=80',
        'github.com/gabrielsantos-fatec', 'linkedin.com/in/gabrielsantos-ti', 96
 FROM usuarios u WHERE u.email = 'gabriel.santos@fatec.sp.gov.br'
-AND NOT EXISTS (SELECT 1 FROM candidatos WHERE usuario_id = u.id);
+ON CONFLICT DO NOTHING;
 
-INSERT INTO candidatos (usuario_id, nome, idade, curso, semestre, unidade_fatec, sobre, competencias, disponibilidade, imagem_url, github, linkedin, match_score)
-SELECT u.id, 'Letícia Ribeiro Martins', 21, 'Análise e Desenvolvimento de Sistemas', '3º Semestre', 'Fatec Jales - Prof. José Camargo',
+INSERT INTO candidatos (usuario_id, nome, idade, curso, semestre, unidade_fatec, localizacao, sobre, competencias, disponibilidade, imagem_url, github, linkedin, match_score)
+SELECT u.id, 'Letícia Ribeiro Martins', 21, 'Análise e Desenvolvimento de Sistemas', '3º Semestre', 'Fatec Jales - Prof. José Camargo', 'Jales - SP',
        'Estudante de ADS na Fatec Jales apaixonada por desenvolvimento Front-End e interfaces modernas e acessíveis. Criação de layouts no Figma e desenvolvimento mobile com React Native.',
        ARRAY['React', 'TypeScript', 'Tailwind CSS', 'Figma', 'UI/UX Design', 'JavaScript'],
        'Tarde', 'https://images.unsplash.com/photo-1573496359142-b8d87734a5a2?auto=format&fit=crop&w=800&q=80',
        'github.com/leticiamartins-dev', 'linkedin.com/in/leticiaribeiro-fatec', 97
 FROM usuarios u WHERE u.email = 'leticia.martins@fatec.sp.gov.br'
-AND NOT EXISTS (SELECT 1 FROM candidatos WHERE usuario_id = u.id);
+ON CONFLICT DO NOTHING;
 
-INSERT INTO candidatos (usuario_id, nome, idade, curso, semestre, unidade_fatec, sobre, competencias, disponibilidade, imagem_url, github, linkedin, match_score)
-SELECT u.id, 'Matheus Oliveira Costa', 23, 'Análise e Desenvolvimento de Sistemas', '4º Semestre', 'Fatec Jales - Prof. José Camargo',
-       'Focado em desenvolvimento Backend de alta performance, modelagem de banco relacional PostgreSQL e arquitetura orientada a microsserviços. Estudante da Fatec Jales.',
+INSERT INTO candidatos (usuario_id, nome, idade, curso, semestre, unidade_fatec, localizacao, sobre, competencias, disponibilidade, imagem_url, github, linkedin, match_score)
+SELECT u.id, 'Matheus Oliveira Costa', 23, 'Análise e Desenvolvimento de Sistemas', '4º Semestre', 'Fatec Jales - Prof. José Camargo', 'Urânia - SP',
+       'Focado em desenvolvimento Backend de alta performance, modelagem de banco relacional PostgreSQL e arquitetura orientada a microsserviços. Estudante da Fatec Jales residente em Urânia.',
        ARRAY['Node.js', 'PostgreSQL', 'Python', 'Docker', 'Git', 'APIs REST'],
        'Integral', 'https://images.unsplash.com/photo-1506794778202-cad84cf45f1d?auto=format&fit=crop&w=800&q=80',
        'github.com/matheuscosta-backend', 'linkedin.com/in/matheuscosta-fatec', 94
 FROM usuarios u WHERE u.email = 'matheus.costa@fatec.sp.gov.br'
-AND NOT EXISTS (SELECT 1 FROM candidatos WHERE usuario_id = u.id);
+ON CONFLICT DO NOTHING;
 
-INSERT INTO candidatos (usuario_id, nome, idade, curso, semestre, unidade_fatec, sobre, competencias, disponibilidade, imagem_url, github, linkedin, match_score)
-SELECT u.id, 'Camila Ferreira Lima', 20, 'Gestão da Tecnologia da Informação', '4º Semestre', 'Fatec Jales - Prof. José Camargo',
-       'Entusiasta de dados e gestão ágil de projetos de TI. Vivência na Fatec Jales com projetos de análise de dados, criação de dashboards no Power BI e melhoria de processos corporativos.',
-       ARRAY['Power BI', 'SQL', 'Metodologias Ágeis', 'Scrum', 'Gestão de Projetos', 'Excel Avançado'],
+INSERT INTO candidatos (usuario_id, nome, idade, curso, semestre, unidade_fatec, localizacao, sobre, competencias, disponibilidade, imagem_url, github, linkedin, match_score)
+SELECT u.id, 'Camila Ferreira Lima', 20, 'Gestão Empresarial (EaD)', '4º Semestre', 'Fatec Jales - Prof. José Camargo', 'Santa Fé do Sul - SP',
+       'Entusiasta de dados e finanças corporativas. Vivência na Fatec Jales com projetos de análise de dados, criação de dashboards no Power BI e melhoria de processos corporativos.',
+       ARRAY['Power BI', 'SQL', 'Metodologias Ágeis', 'Scrum', 'Gestão Financeira', 'Excel Avançado'],
        'Manhã', 'https://images.unsplash.com/photo-1580489944761-15a19d654956?auto=format&fit=crop&w=800&q=80',
        'github.com/camilaferreira-gti', 'linkedin.com/in/camilaferreira-dados', 93
 FROM usuarios u WHERE u.email = 'camila.ferreira@fatec.sp.gov.br'
-AND NOT EXISTS (SELECT 1 FROM candidatos WHERE usuario_id = u.id);
+ON CONFLICT DO NOTHING;
+
+INSERT INTO candidatos (usuario_id, nome, idade, curso, semestre, unidade_fatec, localizacao, sobre, competencias, disponibilidade, imagem_url, github, linkedin, match_score)
+SELECT u.id, 'Lucas Prado', 22, 'Agronegócio', '5º Semestre', 'Fatec Jales - Prof. José Camargo', 'Santa Fé do Sul - SP',
+       'Estudante de Agronegócio na Fatec Jales com foco em inovação no campo (AgTech), gestão de custos da safra, logística agropecuária e sustentabilidade.',
+       ARRAY['Gestão do Agronegócio', 'Cadeia de Suprimentos', 'AgTech', 'Agricultura de Precisão', 'Excel Avançado', 'Power BI'],
+       'Integral', 'https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?auto=format&fit=crop&w=800&q=80',
+       'github.com/lucasprado-agro', 'linkedin.com/in/lucasprado-agro', 94
+FROM usuarios u WHERE u.email = 'lucas.prado@fatec.sp.gov.br'
+ON CONFLICT DO NOTHING;
+
+INSERT INTO candidatos (usuario_id, nome, idade, curso, semestre, unidade_fatec, localizacao, sobre, competencias, disponibilidade, imagem_url, github, linkedin, match_score)
+SELECT u.id, 'Camila Rocha', 23, 'Gestão Empresarial (Presencial)', '6º Semestre', 'Fatec Jales - Prof. José Camargo', 'Votuporanga - SP',
+       'Estudante do 6º semestre de Gestão Empresarial na Fatec Jales. Experiência em planejamento financeiro, liderança ágil e projetos de consultoria regional.',
+       ARRAY['Scrum', 'Gestão Ágil', 'Excel Avançado', 'Gestão Financeira', 'Negociação'],
+       'Manhã', 'https://images.unsplash.com/photo-1573496359142-b8d87734a5a2?auto=format&fit=crop&w=800&q=80',
+       'github.com/camilarocha-gestao', 'linkedin.com/in/camilarocha', 92
+FROM usuarios u WHERE u.email = 'camila.rocha@fatec.sp.gov.br'
+ON CONFLICT DO NOTHING;
 
 -- 6. Vagas das Empresas da Região de Jales, Rio Preto e Fernandópolis
 INSERT INTO oportunidades (empresa_id, empresa_nome, nome_fantasia, cargo, area, curso_relacionado, localizacao, modalidade, tipo, bolsa, descricao, requisitos, beneficios, imagem_url, match_score, status)
@@ -94,9 +114,9 @@ AND NOT EXISTS (SELECT 1 FROM oportunidades WHERE empresa_id = u.id AND cargo = 
 
 INSERT INTO oportunidades (empresa_id, empresa_nome, nome_fantasia, cargo, area, curso_relacionado, localizacao, modalidade, tipo, bolsa, descricao, requisitos, beneficios, imagem_url, match_score, status)
 SELECT u.id, 'Unimed Noroeste Paulista', 'Unimed Noroeste Paulista', 'Estagiário de Suporte Técnico & Infraestrutura de TI',
-       'Infraestrutura & Redes', 'Gestão da Tecnologia da Informação', 'Jales - SP', 'Presencial', 'Estágio', 'R$ 1.850,00',
+       'Infraestrutura & Redes', 'Sistemas para Internet', 'Jales - SP', 'Presencial', 'Estágio', 'R$ 1.850,00',
        'Atuação no departamento de TI da Unimed na unidade de Jales. Apoio aos usuários internos, monitoramento de servidores, redes locais TCP/IP, manutenção preventiva de microcomputadores e suporte ao sistema hospitalar.',
-       ARRAY['Cursando GTI ou ADS na Fatec Jales', 'Conhecimento em redes de computadores e cabeamento estruturado', 'Sistemas Operacionais Windows e Linux', 'Boa comunicação interpessoal'],
+       ARRAY['Cursando Sistemas para Internet ou ADS na Fatec Jales', 'Conhecimento em redes de computadores e cabeamento estruturado', 'Sistemas Operacionais Windows e Linux', 'Boa comunicação interpessoal'],
        ARRAY['Vale Alimentação R$ 700', 'Plano de Saúde Unimed Integral', 'Seguro de Vida', 'Subsídio Educacional FATEC'],
        'https://images.unsplash.com/photo-1519494026892-80bbd2d6fd0d?auto=format&fit=crop&w=800&q=80', 95, 'ativa'
 FROM usuarios u WHERE u.email = 'rh@unimedjales.com.br'
@@ -106,7 +126,7 @@ INSERT INTO oportunidades (empresa_id, empresa_nome, nome_fantasia, cargo, area,
 SELECT u.id, 'TOTVS Rio Preto', 'TOTVS Unidade Rio Preto', 'Estágio em Desenvolvimento Full-Stack (React & Node/Java)',
        'Tecnologia da Informação', 'Análise e Desenvolvimento de Sistemas', 'São José do Rio Preto - SP', 'Híbrido', 'Estágio', 'R$ 2.450,00',
        'Integre a equipe de engenharia da TOTVS Rio Preto desenvolvendo soluções corporativas para clientes de médio e grande porte do Noroeste Paulista. Desenvolvimento de novas interfaces em React e integrações via API REST.',
-       ARRAY['Cursando ADS ou GTI na Fatec Jales ou região', 'Conhecimentos em React ou JavaScript moderno', 'Conceitos de orientação a objetos e bancos relacionais', 'Vontade de crescer e aprender'],
+       ARRAY['Cursando ADS ou Sistemas para Internet na Fatec Jales ou região', 'Conhecimentos em React ou JavaScript moderno', 'Conceitos de orientação a objetos e bancos relacionais', 'Vontade de crescer e aprender'],
        ARRAY['Vale Refeição Flexível R$ 900', 'Vale Transporte', 'Gympass / TotalPass', 'Trilha de Certificações Cloud', 'Plano de Carreira'],
        'https://images.unsplash.com/photo-1497366216548-37526070297c?auto=format&fit=crop&w=800&q=80', 96, 'ativa'
 FROM usuarios u WHERE u.email = 'rh@totvsriopreto.com.br'
@@ -116,7 +136,7 @@ INSERT INTO oportunidades (empresa_id, empresa_nome, nome_fantasia, cargo, area,
 SELECT u.id, 'Kodigos Tecnologia', 'Kodigos Tecnologia', 'Estágio Mobile (React Native / Expo)',
        'Engenharia Mobile', 'Análise e Desenvolvimento de Sistemas', 'Fernandópolis - SP', 'Híbrido', 'Estágio', 'R$ 2.200,00',
        'Buscamos alunos da Fatec Jales ou Fernandópolis para desenvolver aplicativos para iOS e Android com React Native e Expo. Foco em UX fluida, consumo de APIs e publicação nas lojas.',
-       ARRAY['Cursando Análise e Desenvolvimento de Sistemas', 'Familiaridade com React Native ou React Web', 'Conhecimento em TypeScript e consumo de APIs REST', 'Criatividade e proatividade'],
+       ARRAY['Cursando Análise e Desenvolvimento de Sistemas ou Sistemas para Internet', 'Familiaridade com React Native ou React Web', 'Conhecimento em TypeScript e consumo de APIs REST', 'Criatividade e proatividade'],
        ARRAY['Vale Refeição R$ 600', 'Auxílio Home Office', 'Horário Flexível para Faculdade', 'Mentoria com Devs Seniores'],
        'https://images.unsplash.com/photo-1522071820081-009f0129c71c?auto=format&fit=crop&w=800&q=80', 94, 'ativa'
 FROM usuarios u WHERE u.email = 'talentos@kodigos.com.br'
@@ -124,9 +144,9 @@ AND NOT EXISTS (SELECT 1 FROM oportunidades WHERE empresa_id = u.id AND cargo = 
 
 INSERT INTO oportunidades (empresa_id, empresa_nome, nome_fantasia, cargo, area, curso_relacionado, localizacao, modalidade, tipo, bolsa, descricao, requisitos, beneficios, imagem_url, match_score, status)
 SELECT u.id, 'Target Sistemas', 'Target Sistemas', 'Estágio em Business Intelligence (BI) & Análise de Dados',
-       'Dados & Inteligência Artificial', 'Gestão da Tecnologia da Informação', 'São José do Rio Preto - SP', 'Remoto', 'Estágio', 'R$ 2.300,00',
+       'Dados & Inteligência Artificial', 'Sistemas para Internet', 'São José do Rio Preto - SP', 'Remoto', 'Estágio', 'R$ 2.300,00',
        'Auxiliar na extração, transformação e carga de dados (ETL) e desenvolvimento de dashboards gerenciais em Power BI para empresas de logística e atacado distribuidor de todo o Brasil.',
-       ARRAY['Cursando GTI ou ADS na Fatec Jales a partir do 3º semestre', 'Domínio de SQL e raciocínio lógico analítico', 'Conhecimento ou interesse em Power BI / Python para dados', 'Organização e atenção a detalhes'],
+       ARRAY['Cursando ADS, Sistemas para Internet ou Gestão Empresarial na Fatec Jales a partir do 3º semestre', 'Domínio de SQL e raciocínio lógico analítico', 'Conhecimento ou interesse em Power BI / Python para dados', 'Organização e atenção a detalhes'],
        ARRAY['Vale Alimentação R$ 850', 'Assistência Médica e Odontológica', 'Ajuda de Custo Home Office R$ 200', 'Auxílio Livros'],
        'https://images.unsplash.com/photo-1486406146926-c627a92ad1ab?auto=format&fit=crop&w=800&q=80', 92, 'ativa'
 FROM usuarios u WHERE u.email = 'vagas@targetsistemas.com.br'
@@ -160,7 +180,7 @@ ON CONFLICT (aluno_id, vaga_id) DO NOTHING;
 INSERT INTO candidaturas (aluno_id, candidato_id, vaga_id, status, mensagem_apresentacao, match_score_momento, match_justificativas)
 SELECT u.id, c.id, o.id, 'entrevista',
        'Olá RH da Unimed Noroeste Paulista! Tenho formação focada em infraestrutura e redes na Fatec Jales, e gostaria muito de contribuir no suporte de TI hospitalar.',
-       96, ARRAY['Cursando GTI na Fatec Jales', 'Conhecimento em Redes e Sistemas Operacionais', 'Localizado em Jales']
+       96, ARRAY['Cursando Sistemas para Internet na Fatec Jales', 'Conhecimento em Redes e Sistemas Operacionais', 'Localizado na região de Jales']
 FROM usuarios u
 JOIN candidatos c ON c.usuario_id = u.id
 CROSS JOIN oportunidades o
@@ -196,7 +216,7 @@ ON CONFLICT (aluno_id, vaga_id) DO NOTHING;
 INSERT INTO candidaturas (aluno_id, candidato_id, vaga_id, status, mensagem_apresentacao, match_score_momento, match_justificativas)
 SELECT u.id, c.id, o.id, 'enviada',
        'Olá Target Sistemas! Desenvolvo dashboards em Power BI e modelagem dimensional na Fatec Jales. Oportunidade perfeita para minha área de estudo!',
-       92, ARRAY['Cursando GTI na Fatec Jales', 'Forte afinidade com Power BI e SQL']
+       92, ARRAY['Cursando Gestão Empresarial na Fatec Jales', 'Forte afinidade com Power BI e SQL']
 FROM usuarios u
 JOIN candidatos c ON c.usuario_id = u.id
 CROSS JOIN oportunidades o

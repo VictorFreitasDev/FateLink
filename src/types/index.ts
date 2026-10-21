@@ -11,8 +11,31 @@ export interface User {
   criadoEm?: string;
 }
 
+export interface MatchBreakdown {
+  competencias: number;     // 0 a 35
+  formacao: number;         // 0 a 20
+  experiencia: number;      // 0 a 15
+  disponibilidade: number;  // 0 a 15
+  localizacao: number;      // 0 a 15
+}
+
+export interface MatchEvaluationResult {
+  score: number;
+  nivel: 'excelente' | 'alto' | 'moderado' | 'baixo';
+  breakdown: MatchBreakdown;
+  matchedSkills: string[];
+  missingMandatorySkills: string[];
+  missingDesirableSkills: string[];
+  strengths: string[];
+  improvements: string[];
+  explanations: string[];
+  isBlocked: boolean;
+  blockReasons: string[];
+}
+
 export interface Opportunity {
   id: string;
+  dbId?: number;
   empresaId?: number;
   empresa: string;
   nomeFantasia: string;
@@ -29,6 +52,14 @@ export interface Opportunity {
   imagemUrl: string;
   matchScore: number;
   matchExplanations?: string[];
+  matchBreakdown?: MatchBreakdown;
+  matchedSkills?: string[];
+  missingSkills?: string[];
+  strengths?: string[];
+  improvements?: string[];
+  isBlocked?: boolean;
+  blockReasons?: string[];
+  matchLevel?: 'excelente' | 'alto' | 'moderado' | 'baixo';
   status?: 'ativa' | 'pausada' | 'encerrada';
   visualizacoes?: number;
   inscritosCount?: number;
@@ -67,14 +98,37 @@ export interface MutualMatch {
   matchData: string;
 }
 
+export interface CandidateProject {
+  id?: string;
+  titulo: string;
+  descricao: string;
+  tecnologias?: string[];
+  imagemUrl?: string;
+  githubUrl?: string;
+  demoUrl?: string;
+}
+
+export interface CandidateExperience {
+  id?: string;
+  cargo: string;
+  empresa: string;
+  periodo: string;
+  descricao: string;
+}
+
 export interface Candidate {
   id: string;
+  dbId?: number;
   usuarioId?: number;
   nome: string;
   idade: number;
   curso: string;
   semestre: string;
   unidadeFatec: string;
+  previsaoFormacao?: string;
+  localizacao?: string;
+  modalidadeDesejada?: 'Remoto' | 'Híbrido' | 'Presencial' | 'Qualquer';
+  portfolio?: string;
   sobre: string;
   competencias: string[];
   disponibilidade: 'Manhã' | 'Tarde' | 'Noite' | 'Integral';
@@ -83,8 +137,16 @@ export interface Candidate {
   linkedin?: string;
   matchScore: number;
   matchExplanations?: string[];
-  projetos?: Array<{ titulo: string; descricao: string; link?: string }>;
-  experiencias?: Array<{ cargo: string; empresa: string; periodo: string; descricao: string }>;
+  matchBreakdown?: MatchBreakdown;
+  matchedSkills?: string[];
+  missingSkills?: string[];
+  strengths?: string[];
+  improvements?: string[];
+  isBlocked?: boolean;
+  blockReasons?: string[];
+  matchLevel?: 'excelente' | 'alto' | 'moderado' | 'baixo';
+  projetos?: CandidateProject[];
+  experiencias?: CandidateExperience[];
   certificacoes?: string[];
   curriculoUrl?: string;
   criadoEm?: string;
@@ -92,12 +154,44 @@ export interface Candidate {
 
 export type ApplicationStatus =
   | 'enviada'
+  | 'nova'
   | 'em_analise'
+  | 'selecionado'
   | 'entrevista'
   | 'proposta'
   | 'contratado'
   | 'recusada'
+  | 'recusado'
+  | 'encerrado'
   | 'desistente';
+
+export type InterviewStatus = 'pendente' | 'confirmada' | 'reagendamento_solicitado' | 'cancelada' | 'concluida';
+export type InterviewFormat = 'online' | 'presencial';
+
+export interface InterviewSchedule {
+  id: number;
+  candidaturaId: number;
+  empresaId: number;
+  alunoId: number;
+  vagaId: number;
+  status: InterviewStatus;
+  formato: InterviewFormat;
+  linkOuLocal?: string;
+  horariosPropostos: string[];
+  horarioConfirmado?: string;
+  observacoes?: string;
+  criadoEm: string;
+  atualizadoEm?: string;
+  vagaCargo?: string;
+  empresaNome?: string;
+  empresaImagem?: string;
+  alunoNome?: string;
+  alunoEmail?: string;
+  alunoCurso?: string;
+  alunoSemestre?: string;
+  alunoUnidade?: string;
+  alunoImagem?: string;
+}
 
 export interface Application {
   id: number;
@@ -116,15 +210,18 @@ export interface Application {
   alunoNome?: string;
   alunoEmail?: string;
   empresaNome?: string;
+  entrevista?: InterviewSchedule | null;
+  historico?: ApplicationHistory[];
 }
 
 export interface ApplicationHistory {
   id: number;
   candidaturaId: number;
-  statusAnterior?: ApplicationStatus;
+  statusAnterior?: string | null;
   statusNovo: ApplicationStatus;
   motivo?: string;
   alteradoPor?: number;
+  alteradoPorNome?: string;
   criadoEm: string;
 }
 
@@ -136,6 +233,7 @@ export interface ChatMessage {
   text: string;
   time: string;
   lida?: boolean;
+  status?: 'enviando' | 'entregue' | 'lida';
 }
 
 export interface Conversation {
@@ -158,15 +256,88 @@ export interface NotificationItem {
   description: string;
   time: string;
   read: boolean;
-  type: 'match' | 'message' | 'proposal' | 'candidatura' | 'status' | 'sistema';
+  type: 'match' | 'message' | 'proposal' | 'candidatura' | 'status' | 'entrevista' | 'sistema';
 }
 
 export interface RecruiterDashboardData {
   vagasAtivasCount: number;
   vagasEncerradasCount: number;
   totalCandidaturas: number;
-  candidatosPorEtapa: Record<ApplicationStatus, number>;
+  novosCandidatosCount: number;
+  matchesCount: number;
+  entrevistasCount: number;
+  contratacoesCount: number;
+  candidatosPorEtapa: Record<string, number>;
   totalVisualizacoes: number;
   taxaConversao: number;
-  ultimasCandidaturas: Application[];
+  ultimasCandidaturas?: Application[];
+  indicadores?: {
+    vagasAtivas: number;
+    vagasEncerradas: number;
+    totalCandidaturas: number;
+    novosCandidatos: number;
+    matches: number;
+    entrevistas: number;
+    contratacoes: number;
+  };
 }
+
+export type NavigationTab =
+  | 'list'
+  | 'dashboard'
+  | 'applications'
+  | 'match'
+  | 'chat'
+  | 'publish'
+  | 'filter';
+
+export type SortOption = 'relevancia' | 'recente' | 'maior_bolsa' | 'semestre';
+
+export interface FeedFilterCriteria {
+  // Comum e Estudantes (Vagas)
+  curso?: string;
+  area?: string;
+  modalidade?: string;
+  tipo?: string;
+  localizacao?: string;
+  faixa?: string;
+  minBolsa?: number;
+  competencias?: string[];
+  minMatch?: number;
+  sortBy?: SortOption;
+
+  // Específico para Empresas (Candidatos)
+  unidadeFatec?: string;
+  semestre?: string;
+  disponibilidade?: string;
+}
+
+export interface ChatTarget {
+  name: string;
+  roleInfo: string;
+  targetUserId?: number;
+  vagaId?: number;
+}
+
+export interface MutualMatchInfo {
+  empresaNome: string;
+  cargo: string;
+  alunoNome?: string;
+  empresaId?: number;
+  alunoId?: number;
+  vagaId?: number;
+  alunoImagem?: string;
+  empresaImagem?: string;
+  matchScore?: number;
+}
+
+export interface FeedDecisionResult {
+  success: boolean;
+  decisao?: 'like' | 'pass';
+  targetId?: number;
+  isMutualMatch?: boolean;
+  matchInfo?: MutualMatchInfo;
+}
+
+export type FeedItem = Opportunity | Candidate;
+

@@ -4,7 +4,7 @@ import { SafeAreaProvider, SafeAreaView } from 'react-native-safe-area-context';
 import { StatusBar } from 'expo-status-bar';
 
 import { Colors } from './src/theme/colors';
-import { UserRole, Opportunity, Candidate } from './src/types';
+import { UserRole, Opportunity, Candidate, Conversation, NotificationItem } from './src/types';
 import {
   mockOpportunities,
   mockCandidates,
@@ -51,15 +51,23 @@ export default function App() {
   // Modal de Perfil e Alteração de Foto
   const [profileModalVisible, setProfileModalVisible] = useState(false);
 
-  // Dados do aplicativo (alimentados pelo PostgreSQL com fallback para os mocks)
+  // Dados do aplicativo (persistidos no PostgreSQL fatelinkBD com fallback inicial seguro)
   const [opportunities, setOpportunities] = useState<Opportunity[]>(mockOpportunities);
   const [candidates, setCandidates] = useState<Candidate[]>(mockCandidates);
-  const [conversations, setConversations] = useState(mockConversations);
-  const [notifications, setNotifications] = useState(mockNotifications);
+  const [conversations, setConversations] = useState<Conversation[]>(mockConversations);
+  const [notifications, setNotifications] = useState<NotificationItem[]>(mockNotifications);
 
-  // Busca e Chat Ativo
+  // Filtros aplicados no feed
+  const [appliedFilters, setAppliedFilters] = useState<any>(null);
+
+  // Busca e Chat Ativo com IDs reais de participantes
   const [searchQuery, setSearchQuery] = useState('');
-  const [activeChatTarget, setActiveChatTarget] = useState<{ name: string; roleInfo: string } | null>(null);
+  const [activeChatTarget, setActiveChatTarget] = useState<{
+    name: string;
+    roleInfo: string;
+    targetUserId?: number;
+    vagaId?: number;
+  } | null>(null);
 
   // Estado de pull-to-refresh
   const [refreshing, setRefreshing] = useState(false);
@@ -69,17 +77,78 @@ export default function App() {
     setRefreshing(true);
     try {
       const [opps, cands] = await Promise.all([
-        api.getOpportunities(currentUser?.tipo === 'aluno' ? currentUser.id : undefined),
-        api.getCandidates(),
+        api.getOpportunities(currentUser?.tipo === 'aluno' ? currentUser.id : undefined, appliedFilters || undefined),
+        api.getCandidates(appliedFilters || undefined),
       ]);
-      if (opps && opps.length > 0) setOpportunities(opps);
-      if (cands && cands.length > 0) setCandidates(cands);
+      if (Array.isArray(opps)) setOpportunities(opps);
+      if (Array.isArray(cands)) setCandidates(cands);
+
+      if (currentUser?.id) {
+        const notifs = await api.getNotifications(currentUser.id);
+        if (Array.isArray(notifs)) setNotifications(notifs);
+      }
     } catch (e) {
       console.warn('Erro ao atualizar feed:', e);
     } finally {
       setRefreshing(false);
     }
   };
+
+  // Previne zoom por duplo clique ou duplo toque no ambiente web/mobile web preservando gestos de swipe
+  useEffect(() => {
+    if (Platform.OS === 'web' && typeof document !== 'undefined') {
+      const handleGesture = (e: Event) => {
+        e.preventDefault();
+      };
+
+      const handleDblClick = (e: MouseEvent) => {
+        const target = e.target as HTMLElement | null;
+        if (
+          target &&
+          (target.tagName === 'INPUT' ||
+            target.tagName === 'TEXTAREA' ||
+            target.isContentEditable)
+        ) {
+          return;
+        }
+        e.preventDefault();
+      };
+
+      // Injeta regra de CSS para manipulação de toque sem zoom duplo
+      const styleId = 'fatelink-prevent-zoom-styles';
+      if (!document.getElementById(styleId)) {
+        const style = document.createElement('style');
+        style.id = styleId;
+        style.textContent = `
+          html, body, #root {
+            touch-action: manipulation;
+            -webkit-text-size-adjust: 100%;
+          }
+        `;
+        document.head.appendChild(style);
+      }
+
+      // Garante viewport sem permitir escalonamento acidental
+      let metaViewport = document.querySelector('meta[name="viewport"]');
+      if (!metaViewport) {
+        metaViewport = document.createElement('meta');
+        metaViewport.setAttribute('name', 'viewport');
+        document.head.appendChild(metaViewport);
+      }
+      metaViewport.setAttribute(
+        'content',
+        'width=device-width, initial-scale=1.0, maximum-scale=1.0, minimum-scale=1.0, user-scalable=no, shrink-to-fit=no, viewport-fit=cover'
+      );
+
+      document.addEventListener('gesturestart', handleGesture as any);
+      document.addEventListener('dblclick', handleDblClick, { passive: false });
+
+      return () => {
+        document.removeEventListener('gesturestart', handleGesture as any);
+        document.removeEventListener('dblclick', handleDblClick);
+      };
+    }
+  }, []);
 
   // Recarrega feed quando o usuário loga ou acessa a aba de feed/talentos
   useEffect(() => {
@@ -92,6 +161,7 @@ export default function App() {
       setCurrentUser(null);
       setCurrentScreen('login');
       setProfileModalVisible(false);
+      setAppliedFilters(null);
     };
 
     if (Platform.OS === 'web') {
@@ -111,9 +181,9 @@ export default function App() {
     ]);
   };
 
-  // Iniciar conversa direta a partir de um Card
-  const handleStartChat = (name: string, roleInfo: string) => {
-    setActiveChatTarget({ name, roleInfo });
+  // Iniciar conversa direta com IDs reais de participantes
+  const handleStartChat = (name: string, roleInfo: string, targetUserId?: number, vagaId?: number) => {
+    setActiveChatTarget({ name, roleInfo, targetUserId, vagaId });
     setCurrentTab('chat');
   };
 
@@ -137,73 +207,66 @@ export default function App() {
     }
   };
 
-  // Publicar nova oportunidade (Empresa publica Vagas para Alunos)
+  // Publicar nova oportunidade (Empresa publica Vagas para Alunos com persistência estrita no banco)
   const handlePublishOpportunity = async (oppData: Partial<Opportunity>): Promise<boolean> => {
     try {
       const created = await api.createOpportunity(oppData);
       if (created) {
-        setOpportunities((prev) => [created, ...prev]);
+        setOpportunities((prev) => [created, ...prev.filter((o) => o.id !== created.id)]);
         return true;
       }
-      // Fallback
-      const fallback: Opportunity = {
-        id: `opp-${Date.now()}`,
-        empresa: oppData.empresa || 'Empresa Parceira',
-        nomeFantasia: oppData.nomeFantasia || 'Tech Partner',
-        cargo: oppData.cargo || 'Estagiário',
-        area: oppData.area || 'Tecnologia da Informação',
-        cursoRelacionado: 'TI / FATEC',
-        localizacao: oppData.localizacao || 'São Paulo - SP',
-        modalidade: (oppData.modalidade as any) || 'Híbrido',
-        tipo: (oppData.tipo as any) || 'Estágio',
-        bolsa: oppData.bolsa || 'A combinar',
-        descricao: oppData.descricao || '',
-        requisitos: oppData.requisitos || ['Estudante FATEC ativo'],
-        beneficios: oppData.beneficios || ['Bolsa-Auxílio'],
-        imagemUrl: oppData.imagemUrl || 'https://images.unsplash.com/photo-1486406146926-c627a92ad1ab?auto=format&fit=crop&w=800&q=80',
-        matchScore: 96,
-      };
-      setOpportunities((prev) => [fallback, ...prev]);
-      return true;
+      return false;
     } catch (e) {
+      console.warn('Erro ao salvar oportunidade:', e);
       return false;
     }
   };
 
-  // Publicar novo currículo (Aluno publica Currículo para Empresas)
+  // Publicar novo currículo (Aluno publica Currículo para Empresas com persistência estrita no banco)
   const handlePublishCandidate = async (candData: Partial<Candidate>): Promise<boolean> => {
     try {
       const created = await api.createCandidate(candData);
       if (created) {
-        setCandidates((prev) => [created, ...prev]);
+        setCandidates((prev) => [created, ...prev.filter((c) => c.id !== created.id)]);
         return true;
       }
-      // Fallback
-      const fallback: Candidate = {
-        id: `cand-${Date.now()}`,
-        nome: candData.nome || 'Estudante FATEC',
-        idade: candData.idade || 21,
-        curso: candData.curso || 'Análise e Desenv. de Sistemas',
-        semestre: candData.semestre || '4º Semestre',
-        unidadeFatec: candData.unidadeFatec || 'Fatec Zona Leste',
-        sobre: candData.sobre || '',
-        competencias: candData.competencias || ['Tecnologia'],
-        disponibilidade: (candData.disponibilidade as any) || 'Tarde',
-        imagemUrl: candData.imagemUrl || 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?auto=format&fit=crop&w=800&q=80',
-        github: candData.github,
-        linkedin: candData.linkedin,
-        matchScore: 98,
-      };
-      setCandidates((prev) => [fallback, ...prev]);
-      return true;
+      return false;
     } catch (e) {
+      console.warn('Erro ao salvar candidato:', e);
       return false;
     }
   };
 
-  // Aplicar filtros
-  const handleApplyFilters = (filters: any) => {
+  // Aplicar filtros no feed com sincronização backend
+  const handleApplyFilters = async (filters: any) => {
+    setAppliedFilters(filters);
     setCurrentTab('list');
+    try {
+      if (currentUser?.tipo === 'aluno') {
+        const opps = await api.getOpportunities(currentUser?.id, filters);
+        if (Array.isArray(opps)) setOpportunities(opps);
+      } else {
+        const cands = await api.getCandidates(filters);
+        if (Array.isArray(cands)) setCandidates(cands);
+      }
+    } catch (e) {
+      console.warn('Erro ao carregar dados com filtros:', e);
+    }
+  };
+
+  // Limpar filtros do feed
+  const handleClearFilters = async () => {
+    setAppliedFilters(null);
+    try {
+      const [opps, cands] = await Promise.all([
+        api.getOpportunities(currentUser?.tipo === 'aluno' ? currentUser.id : undefined),
+        api.getCandidates(),
+      ]);
+      if (Array.isArray(opps)) setOpportunities(opps);
+      if (Array.isArray(cands)) setCandidates(cands);
+    } catch (e) {
+      console.warn('Erro ao limpar filtros no feed:', e);
+    }
   };
 
   // 1. Tela Splash Inicial
@@ -280,9 +343,18 @@ export default function App() {
           visible={profileModalVisible}
           onClose={() => setProfileModalVisible(false)}
           user={currentUser}
-          onProfileUpdated={(newImageUrl) => {
+          onProfileUpdated={(updated) => {
             if (currentUser) {
-              setCurrentUser({ ...currentUser, imagemUrl: newImageUrl });
+              if (typeof updated === 'string') {
+                setCurrentUser({ ...currentUser, imagemUrl: updated });
+              } else if (updated && typeof updated === 'object') {
+                setCurrentUser({
+                  ...currentUser,
+                  ...(updated.imagemUrl ? { imagemUrl: updated.imagemUrl } : {}),
+                  ...(updated.nome ? { nome: updated.nome } : {}),
+                  ...(updated.curso_ou_ramo ? { curso_ou_ramo: updated.curso_ou_ramo } : {}),
+                });
+              }
             }
           }}
           onLogout={handleLogout}
@@ -312,9 +384,13 @@ export default function App() {
             <ListScreen
               role={userRole}
               currentUserId={currentUser?.id}
+              currentUserName={currentUser?.nome}
+              currentUserAvatar={currentUser?.imagemUrl}
               opportunities={opportunities}
               candidates={candidates}
               searchQuery={searchQuery}
+              appliedFilters={appliedFilters}
+              onClearFilters={handleClearFilters}
               onStartChat={handleStartChat}
               onApplyToOpportunity={handleApplyToOpportunity}
               onRefresh={handleRefreshFeed}
@@ -343,6 +419,8 @@ export default function App() {
           {currentTab === 'filter' && (
             <FilterScreen
               role={userRole}
+              opportunities={opportunities}
+              candidates={candidates}
               onApplyFilters={handleApplyFilters}
             />
           )}

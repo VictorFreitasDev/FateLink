@@ -1,0 +1,67 @@
+<!doctype html>
+<html lang="pt-BR">
+  <head>
+    <meta charset="utf-8" />
+    <meta http-equiv="X-UA-Compatible" content="IE=edge" />
+    <!-- Previne aproximação de tela (zoom) ao clicar duas vezes ou dar duplo toque -->
+    <meta
+      name="viewport"
+      content="width=device-width, initial-scale=1.0, maximum-scale=1.0, minimum-scale=1.0, user-scalable=no, shrink-to-fit=no, viewport-fit=cover"
+    />
+    <title>FateLink 2.0</title>
+
+    <!-- Estilos de reset com desabilitação de double-tap zoom -->
+    <style id="expo-reset">
+      html,
+      body {
+        height: 100%;
+        margin: 0;
+        padding: 0;
+        touch-action: manipulation;
+        -webkit-touch-callout: none;
+        -webkit-tap-highlight-color: transparent;
+        -webkit-text-size-adjust: 100%;
+      }
+      body {
+        overflow: hidden;
+      }
+      #root {
+        display: flex;
+        height: 100%;
+        flex: 1;
+        touch-action: manipulation;
+      }
+    </style>
+    <link rel="icon" href="/favicon.ico" />
+
+    <script>
+      // Desabilita gesto de pinça no Safari iOS
+      document.addEventListener('gesturestart', function (e) {
+        e.preventDefault();
+      });
+
+      // Desabilita duplo clique de zoom no desktop (preservando inputs e textareas)
+      document.addEventListener(
+        'dblclick',
+        function (e) {
+          if (
+            e.target &&
+            (e.target.tagName === 'INPUT' ||
+              e.target.tagName === 'TEXTAREA' ||
+              e.target.isContentEditable)
+          ) {
+            return;
+          }
+          e.preventDefault();
+        },
+        { passive: false }
+      );
+    </script>
+  </head>
+
+  <body>
+    <noscript> Você precisa ativar o JavaScript para executar o FateLink. </noscript>
+    <div id="root"></div>
+  </body>
+</html>
+

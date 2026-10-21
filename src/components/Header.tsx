@@ -29,85 +29,87 @@ export const Header: React.FC<HeaderProps> = ({
 }) => {
   return (
     <View style={styles.container}>
-      {/* Linha superior: Logo / Perfil & Identificador Fixo de Papel + Logout */}
-      <View style={styles.topRow}>
-        <TouchableOpacity
-          style={styles.userSection}
-          onPress={onOpenProfile}
-          activeOpacity={0.75}
-        >
-          <View style={styles.avatarBorder}>
-            <Image
-              source={userAvatarUrl ? { uri: userAvatarUrl } : require('../../assets/profile-avatar.png')}
-              style={styles.avatar}
-              defaultSource={require('../../assets/profile-avatar.png')}
-            />
-          </View>
-          <View style={styles.userInfo}>
-            <Text style={styles.greeting}>Bem-vindo(a),</Text>
-            <View style={styles.userNameRow}>
-              <Text style={styles.userName} numberOfLines={1}>
-                {userName || (role === 'aluno' ? 'Aluno FATEC' : 'Empresa Parceira')}
-              </Text>
-              <Ionicons name="chevron-down" size={12} color={Colors.textSecondary} />
+      <View style={styles.innerWrapper}>
+        {/* Linha superior: Logo / Perfil & Identificador Fixo de Papel + Logout */}
+        <View style={styles.topRow}>
+          <TouchableOpacity
+            style={styles.userSection}
+            onPress={onOpenProfile}
+            activeOpacity={0.75}
+          >
+            <View style={styles.avatarBorder}>
+              <Image
+                source={userAvatarUrl ? { uri: userAvatarUrl } : require('../../assets/profile-avatar.png')}
+                style={styles.avatar}
+                defaultSource={require('../../assets/profile-avatar.png')}
+              />
             </View>
-          </View>
-        </TouchableOpacity>
-
-        <View style={styles.actionsSection}>
-          {/* Badge fixo do perfil do banco de dados (Sem toggle, definido no login/cadastro) */}
-          <View style={[styles.roleBadge, role === 'empresa' && styles.roleBadgeEmpresa]}>
-            <Ionicons
-              name={role === 'aluno' ? 'school' : 'business'}
-              size={13}
-              color="#FFFFFF"
-              style={{ marginRight: 4 }}
-            />
-            <Text style={styles.roleText}>{role === 'aluno' ? 'ALUNO' : 'EMPRESA'}</Text>
-          </View>
-
-          {/* Notificações */}
-          <TouchableOpacity
-            style={styles.notifButton}
-            onPress={onOpenNotifications}
-            activeOpacity={0.7}
-          >
-            <Ionicons name="notifications-outline" size={20} color={Colors.textPrimary} />
-            {unreadCount > 0 && (
-              <View style={styles.badgeDot}>
-                <Text style={styles.badgeText}>{unreadCount}</Text>
+            <View style={styles.userInfo}>
+              <Text style={styles.greeting}>Bem-vindo(a),</Text>
+              <View style={styles.userNameRow}>
+                <Text style={styles.userName} numberOfLines={1}>
+                  {userName || (role === 'aluno' ? 'Aluno FATEC' : 'Empresa Parceira')}
+                </Text>
+                <Ionicons name="chevron-down" size={12} color={Colors.textSecondary} />
               </View>
-            )}
+            </View>
           </TouchableOpacity>
 
-          {/* Botão de Sair / Logout */}
-          <TouchableOpacity
-            style={styles.logoutButton}
-            onPress={onLogout}
-            activeOpacity={0.7}
-            hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
-          >
-            <Ionicons name="log-out-outline" size={20} color={Colors.dislike} />
-          </TouchableOpacity>
+          <View style={styles.actionsSection}>
+            {/* Badge fixo do perfil do banco de dados (Sem toggle, definido no login/cadastro) */}
+            <View style={[styles.roleBadge, role === 'empresa' && styles.roleBadgeEmpresa]}>
+              <Ionicons
+                name={role === 'aluno' ? 'school' : 'business'}
+                size={13}
+                color="#FFFFFF"
+                style={{ marginRight: 4 }}
+              />
+              <Text style={styles.roleText}>{role === 'aluno' ? 'ALUNO' : 'EMPRESA'}</Text>
+            </View>
+
+            {/* Notificações */}
+            <TouchableOpacity
+              style={styles.notifButton}
+              onPress={onOpenNotifications}
+              activeOpacity={0.7}
+            >
+              <Ionicons name="notifications-outline" size={20} color={Colors.textPrimary} />
+              {unreadCount > 0 && (
+                <View style={styles.badgeDot}>
+                  <Text style={styles.badgeText}>{unreadCount}</Text>
+                </View>
+              )}
+            </TouchableOpacity>
+
+            {/* Botão de Sair / Logout */}
+            <TouchableOpacity
+              style={styles.logoutButton}
+              onPress={onLogout}
+              activeOpacity={0.7}
+              hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
+            >
+              <Ionicons name="log-out-outline" size={20} color={Colors.dislike} />
+            </TouchableOpacity>
+          </View>
         </View>
-      </View>
 
-      {/* Barra de Pesquisa */}
-      <View style={styles.searchBar}>
-        <Ionicons name="search" size={18} color={Colors.primary} style={styles.searchIcon} />
-        <TextInput
-          value={searchQuery}
-          onChangeText={onSearchChange}
-          placeholder={role === 'aluno' ? 'Pesquisar vagas, empresas, tecnologias...' : 'Pesquisar alunos, cursos, competências...'}
-          placeholderTextColor={Colors.placeholder}
-          style={styles.searchInput}
-          returnKeyType="search"
-        />
-        {searchQuery.length > 0 && (
-          <TouchableOpacity onPress={() => onSearchChange('')} hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}>
-            <Ionicons name="close-circle" size={16} color={Colors.placeholder} />
-          </TouchableOpacity>
-        )}
+        {/* Barra de Pesquisa */}
+        <View style={styles.searchBar}>
+          <Ionicons name="search" size={18} color={Colors.primary} style={styles.searchIcon} />
+          <TextInput
+            value={searchQuery}
+            onChangeText={onSearchChange}
+            placeholder={role === 'aluno' ? 'Pesquisar vagas, empresas, tecnologias...' : 'Pesquisar alunos, cursos, competências...'}
+            placeholderTextColor={Colors.placeholder}
+            style={styles.searchInput}
+            returnKeyType="search"
+          />
+          {searchQuery.length > 0 && (
+            <TouchableOpacity onPress={() => onSearchChange('')} hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}>
+              <Ionicons name="close-circle" size={16} color={Colors.placeholder} />
+            </TouchableOpacity>
+          )}
+        </View>
       </View>
     </View>
   );
@@ -121,6 +123,11 @@ const styles = StyleSheet.create({
     paddingBottom: 12,
     borderBottomWidth: 1,
     borderBottomColor: Colors.divider,
+  },
+  innerWrapper: {
+    maxWidth: 1200,
+    width: '100%',
+    alignSelf: 'center',
   },
   topRow: {
     flexDirection: 'row',
